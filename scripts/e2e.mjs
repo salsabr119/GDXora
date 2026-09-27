@@ -2,6 +2,8 @@
 // Exercises the real Auth + PostgREST + RLS path the app uses, the ZATCA
 // library, and the public REST API router.
 //   SUPABASE_URL=… SUPABASE_ANON_KEY=… SUPABASE_SERVICE_ROLE_KEY=… node scripts/e2e.mjs
+// Against a deployment (no service key needed — the public API is called over HTTP):
+//   SUPABASE_URL=… SUPABASE_ANON_KEY=… API_BASE=https://your-app.vercel.app/api/v1 node scripts/e2e.mjs
 import assert from "node:assert/strict";
 import { createClient } from "@supabase/supabase-js";
 import { processInvoice, decodeQr } from "../src/lib/zatca/index.js";
@@ -9,10 +11,12 @@ import { processInvoice, decodeQr } from "../src/lib/zatca/index.js";
 const URL_ = process.env.SUPABASE_URL || "http://127.0.0.1:54321";
 const ANON = process.env.SUPABASE_ANON_KEY;
 const SERVICE = process.env.SUPABASE_SERVICE_ROLE_KEY;
-if (!ANON || !SERVICE) { console.error("set SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY"); process.exit(2); }
+const API_BASE = process.env.API_BASE;
+if (!ANON || (!SERVICE && !API_BASE)) { console.error("set SUPABASE_ANON_KEY and SUPABASE_SERVICE_ROLE_KEY (or API_BASE)"); process.exit(2); }
 process.env.SUPABASE_URL = URL_;
 
 const stamp = Date.now();
+const DOMAIN = process.env.E2E_EMAIL_DOMAIN || "example.com";
 let step = 0;
 const ok = (msg) => console.log(`  ✓ ${String(++step).padStart(2, "0")} ${msg}`);
 const must = ({ data, error }) => { if (error) throw new Error(error.message); return data; };
@@ -34,8 +38,8 @@ async function signUp(email) {
 }
 
 console.log("GDXora e2e —", URL_);
-const alice = await signUp(`alice.${stamp}@example.com`);
-const mallory = await signUp(`mallory.${stamp}@example.com`);
+const alice = await signUp(`alice.${stamp}@${DOMAIN}`);
+const mallory = await signUp(`mallory.${stamp}@${DOMAIN}`);
 ok("sign-up (Supabase Auth)");
 
 const orgA = must(await alice.rpc("create_organization", { p_name_ar: "شركة الأفق للمقاولات", p_name_en: "Horizon Contracting", p_vat_number: "300000000000003", p_cr_number: "1010999999" }));
@@ -115,8 +119,14 @@ ok("trial balance balances");
 
 // public API through the real router (service role + API key)
 const apiKey = must(await alice.rpc("create_api_key", { p_name: "e2e", p_scopes: ["invoices:read", "invoices:write", "customers:read"] }));
-const { route } = await import("../api/v1/_router.js");
+const { route } = API_BASE ? {} : await import("../api/v1/_router.js");
 async function call(method, path, body, key = apiKey) {
+  if (API_BASE) {
+    const r = await fetch(`${API_BASE}/${path}`, { method, headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+                                                   body: body ? JSON.stringify(body) : undefined });
+    const text = await r.text();
+    return { status: r.status, json: (r.headers.get("content-type") || "").includes("json") ? JSON.parse(text) : text };
+  }
   const req = { method, url: `/api/v1/${path}`, headers: { authorization: `Bearer ${key}` }, body };
   const res = { statusCode: 200, headers: {}, setHeader(k, v) { this.headers[k] = v; }, end(b) { this.body = b; } };
   try { await route(req, res, path.split("?")[0].split("/").filter(Boolean)); }

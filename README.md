@@ -1,6 +1,6 @@
 # GDXora
 
-*ERP for Smart Business*
+*ERP for Smart Business* — by **Global Drive IT Solutions** · [gdrivesol.com](https://www.gdrivesol.com)
 
 **نظام تخطيط موارد المؤسسات (ERP) لشركات الخدمات والمقاولات في السعودية — متعدد الشركات، قابل للبيع كخدمة (SaaS)، ومفتوح للربط مع الأنظمة الأخرى.**
 

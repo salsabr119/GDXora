@@ -95,7 +95,7 @@ export default function App() {
     <AppCtx.Provider value={ctx}>
       <div className="shell">
         <aside className={`side ${menuOpen ? "open" : ""}`} onClick={() => setMenuOpen(false)}>
-          <div className="logo"><i />GDXora</div>
+          <div className="logo"><img src="/logo.png" alt="Global Drive" /><div>GDXora<small>Global Drive IT Solutions</small></div></div>
           {visibleNav.map((s) => (
             <div key={s.group[0]}>
               <div className="group">{t(...s.group)}</div>
@@ -134,6 +134,7 @@ function SetupNeeded() {
   return (
     <div className="auth">
       <div className="card" dir="rtl">
+        <img className="logo-img" src="/logo.png" alt="Global Drive" />
         <div className="brand">GDXora</div>
         <p>لم يتم ربط التطبيق بقاعدة البيانات بعد.</p>
         <ol style={{ lineHeight: 1.9 }}>

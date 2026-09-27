@@ -30,8 +30,10 @@ export function Auth() {
   return (
     <div className="auth">
       <form className="card" onSubmit={submit}>
-        <div className="row"><div className="brand" style={{ flex: 1 }}>GDXora</div>
+        <div className="row" style={{ alignItems: "flex-start" }}><img className="logo-img" src="/logo.png" alt="Global Drive" /><span style={{ flex: 1 }} />
           <button type="button" className="btn ghost sm" onClick={() => setLang(lang === "ar" ? "en" : "ar")}>{lang === "ar" ? "EN" : "ع"}</button></div>
+        <div className="brand">GDXora</div>
+        <div className="motto">Knowledge | Experience | Technology</div>
         <div className="tag">{t("نظام تخطيط موارد المؤسسات لشركات الخدمات والمقاولات", "ERP for services & contracting companies")}</div>
         <Tabs value={mode} onChange={setMode} tabs={[["in", t("دخول", "Sign in")], ["up", t("حساب جديد", "Sign up")], ["reset", t("نسيت كلمة المرور", "Forgot password")]]} />
         <div className="grid" style={{ gap: 12 }}>
@@ -41,6 +43,7 @@ export function Auth() {
             <input type="password" dir="ltr" required minLength={mode === "up" ? 8 : undefined} value={f.password} onChange={(e) => setF({ ...f, password: e.target.value })} /></Field>}
           <button className="btn primary" disabled={busy}>{mode === "in" ? t("دخول", "Sign in") : mode === "up" ? t("إنشاء الحساب", "Create account") : t("إرسال الرابط", "Send link")}</button>
         </div>
+        <div className="foot">{t("من", "By")} <b>Global Drive IT Solutions</b> · <a href="https://www.gdrivesol.com" target="_blank" rel="noreferrer">gdrivesol.com</a></div>
       </form>
     </div>
   );
@@ -64,6 +67,7 @@ export function Onboarding({ onCreated }) {
   return (
     <div className="auth">
       <form className="card" onSubmit={submit} style={{ width: "min(520px, 100%)" }}>
+        <img className="logo-img" src="/logo.png" alt="Global Drive" />
         <div className="brand">{t("لنجهّز شركتك", "Let's set up your company")}</div>
         <div className="tag">{t("نجهّز تلقائياً: دليل حسابات سعودي لشركات الخدمات والمقاولات، رموز ضريبة القيمة المضافة، الفترات المالية، الأدوار والصلاحيات.",
           "We automatically prepare a Saudi chart of accounts for services & contracting, VAT codes, fiscal periods, roles and permissions.")}</div>
