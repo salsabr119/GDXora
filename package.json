@@ -1,0 +1,30 @@
+{
+  "name": "gdxora",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "GDXora — multi-tenant ERP for services & contracting companies (accounting, ZATCA, projects, HR & payroll)",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:db": "./scripts/test-db.sh",
+    "test:e2e": "node scripts/e2e.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.117.2",
+    "qrcode": "^1.5.4",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.7.0",
+    "supabase": "^2.118.0",
+    "vite": "^6.4.3",
+    "vitest": "^3.2.7"
+  }
+}
