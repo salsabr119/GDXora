@@ -44,7 +44,7 @@ npm run test:e2e              # full flow on a running Supabase (SUPABASE_ANON_K
 1. أنشئ مشروع Supabase، ثم طبّق الملفات في `supabase/migrations` بالترتيب (`npx supabase db push`).
 2. انشر المستودع على Vercel. أعدادات Vercel موجودة في `vercel.json`.
 3. أضف متغيرات البيئة التالية في Vercel: `VITE_SUPABASE_URL` و `VITE_SUPABASE_ANON_KEY` و `SUPABASE_URL` و `SUPABASE_SERVICE_ROLE_KEY` و `CRON_SECRET`.
-4. فعّل Cron في Vercel ليعمل مرسل الـ Webhooks (`/api/cron/webhooks` كل 5 دقائق). هذا يتطلب باقة Pro، أما الباقة المجانية فتسمح بتشغيله مرة يومياً فقط.
+4. مرسل الـ Webhooks (`/api/cron/webhooks`) مضبوط على مرة يومياً لأن الباقة المجانية في Vercel لا تسمح بأكثر. مع باقة Pro غيّر `schedule` في `vercel.json` إلى `*/5 * * * *`.
 
 ## الوثائق · Docs
 
