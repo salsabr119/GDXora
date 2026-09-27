@@ -3,6 +3,12 @@ import { supabase, rpc } from "../supabase.js";
 import { useApp, useAction, Field, Tabs } from "../ui.jsx";
 import { isVatNumber } from "../lib/format.js";
 
+// Arabic-Indic (٠-٩) and Persian (۰-۹) digits ↔ Latin digits. An Arabic keyboard
+// types ١٢٣ in password fields; we store Latin digits for new passwords and, on
+// sign-in, also try the other form so accounts created either way still work.
+const toLatinDigits = (s) => s.replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 0x660)).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 0x6f0));
+const toArabicDigits = (s) => s.replace(/[0-9]/g, (d) => String.fromCharCode(0x660 + Number(d)));
+
 export function Auth() {
   const { t, lang, setLang, notify } = useApp();
   const [mode, setMode] = useState("in");
@@ -13,10 +19,15 @@ export function Auth() {
     e.preventDefault();
     await act(async () => {
       if (mode === "in") {
-        const { error } = await supabase.auth.signInWithPassword({ email: f.email, password: f.password });
+        const email = f.email.trim();
+        let { error } = await supabase.auth.signInWithPassword({ email, password: f.password });
+        if (error && /invalid login credentials/i.test(error.message)) {
+          const alt = [toLatinDigits(f.password), toArabicDigits(toLatinDigits(f.password))].find((p) => p !== f.password);
+          if (alt) ({ error } = await supabase.auth.signInWithPassword({ email, password: alt }));
+        }
         if (error) throw error;
       } else if (mode === "up") {
-        const { data, error } = await supabase.auth.signUp({ email: f.email, password: f.password, options: { data: { full_name: f.name } } });
+        const { data, error } = await supabase.auth.signUp({ email: f.email.trim(), password: toLatinDigits(f.password), options: { data: { full_name: f.name } } });
         if (error) throw error;
         if (!data.session) notify(t("تم إنشاء الحساب — افتح الرابط المرسل إلى بريدك لتفعيله", "Account created — confirm via the link sent to your e-mail"), "ok");
       } else {
