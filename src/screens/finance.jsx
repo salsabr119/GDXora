@@ -172,7 +172,7 @@ export function BillEditor({ params }) {
       <Panel><div className="form">
         <Field label={t("المورد", "Vendor")} required invalid={iss.has("vendor")}><Select value={form.vendor_id} onChange={(v) => setForm({ ...form, vendor_id: v })} options={lk.data.vendors} /></Field>
         <Field label={t("رقم فاتورة المورد", "Vendor invoice no.")}><input value={form.vendor_ref || ""} onChange={(e) => setForm({ ...form, vendor_ref: e.target.value })} /></Field>
-        <Field label={t("المشروع", "Project")}><Select value={form.project_id} onChange={(v) => setForm({ ...form, project_id: v })} options={lk.data.projects} /></Field>
+        <Field label={t("المشروع (اختياري)", "Project (optional)")}><Select value={form.project_id} onChange={(v) => setForm({ ...form, project_id: v })} options={lk.data.projects} placeholder={t("بدون مشروع — مصروف عام للشركة", "No project — company overhead")} /></Field>
         <Field label={t("التاريخ", "Date")} required invalid={iss.has("date")}><input type="date" value={form.bill_date} onChange={(e) => setForm({ ...form, bill_date: e.target.value })} /></Field>
         <Field label={t("الاستحقاق", "Due date")}><input type="date" value={form.due_date || ""} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></Field>
         <Field label={t("محتجزات (مقاول باطن)", "Retention (subcontractor)")} invalid={iss.has("retention")}><input className="num" type="number" step="0.01" min="0" value={form.retention_amount ?? 0} onChange={(e) => setForm({ ...form, retention_amount: e.target.value })} /></Field>
@@ -185,7 +185,7 @@ export function BillEditor({ params }) {
             <tr key={k} className={iss.has(`line${k}`) ? "invalid" : ""}>
               <td><input value={l.description} onChange={(e) => setLine(k, { description: e.target.value })} /></td>
               <td><select value={l.account_id || ""} onChange={(e) => setLine(k, { account_id: e.target.value || null })}><option value="">—</option>{lk.data.accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></td>
-              <td><select value={l.project_id || ""} onChange={(e) => setLine(k, { project_id: e.target.value || null })}><option value="">{t("(المشروع العام)", "(bill project)")}</option>{lk.data.projects.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></td>
+              <td><select value={l.project_id || ""} onChange={(e) => setLine(k, { project_id: e.target.value || null })}><option value="">{form.project_id ? t("(نفس مشروع الفاتورة)", "(same as bill)") : t("بدون مشروع", "No project")}</option>{lk.data.projects.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></td>
               <td><input className="num" type="number" step="any" style={{ width: 80 }} value={l.quantity} onChange={(e) => setLine(k, { quantity: e.target.value })} /></td>
               <td><input className="num" type="number" step="0.01" style={{ width: 110 }} value={l.unit_price} onChange={(e) => setLine(k, { unit_price: e.target.value })} /></td>
               <td><select value={l.tax_code_id || ""} onChange={(e) => setLine(k, { tax_code_id: e.target.value || null })}><option value="">{t("بدون ضريبة", "No VAT")}</option>{lk.data.tax.map((x) => <option key={x.id} value={x.id}>{x.label}</option>)}</select></td>
