@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
@@ -6,6 +6,8 @@ import { useApp, useData, useAction, PageHead, Panel, Table, Money, DateText, St
 import * as L from "../lookups.js";
 import { processInvoice } from "../lib/zatca/index.js";
 import { today, num, isVatNumber } from "../lib/format.js";
+import { InvoiceDocument, A4Viewer, docTitle } from "./InvoiceDocument.jsx";
+import { nodeToPdf, downloadBlob, shareOrDownload } from "../lib/pdf.js";
 
 /* ── customers ───────────────────────────────────────────────────────── */
 export function Customers() {
@@ -310,9 +312,18 @@ function InvoiceView({ inv, reload }) {
   const { t, can, org } = useApp();
   const [act, busy] = useAction();
   const [qrImg, setQrImg] = useState(null);
+  const docRef = useRef(null);
   useEffect(() => {
-    if (inv.zatca_qr) QRCode.toDataURL(inv.zatca_qr, { margin: 1, width: 180, errorCorrectionLevel: "M" }).then(setQrImg).catch(() => setQrImg(null));
+    if (inv.zatca_qr) QRCode.toDataURL(inv.zatca_qr, { margin: 1, width: 300, errorCorrectionLevel: "M" }).then(setQrImg).catch(() => setQrImg(null));
   }, [inv.zatca_qr]);
+  const pdfName = `${inv.number || "invoice"}.pdf`;
+  async function makePdf() { return nodeToPdf(docRef.current); }
+  async function onPdf() { await act(async () => { downloadBlob(await makePdf(), pdfName); return true; }); }
+  async function onShare() {
+    const title = `${docTitle(inv).ar} ${inv.number}`;
+    await act(async () => shareOrDownload(await makePdf(), pdfName, {
+      title, text: `${title} — ${org.legal_name || org.name_ar} — ${num(inv.total)} ${t("ر.س", "SAR")}` }));
+  }
   const c = inv.customers;
   const titles = {
     invoice: inv.invoice_kind === "standard" ? t("فاتورة ضريبية", "Tax invoice") : t("فاتورة ضريبية مبسطة", "Simplified tax invoice"),
@@ -334,56 +345,11 @@ function InvoiceView({ inv, reload }) {
         {inv.zatca_xml && <button className="btn no-print" onClick={downloadXml}>{t("تنزيل XML", "Download XML")}</button>}
         {inv.doc_type === "invoice" && can("sales.manage") && <button className="btn no-print" onClick={() => go(`/sales/invoices/new?doc=credit_note&ref=${inv.id}&customer=${inv.customer_id || ""}`)}>{t("إشعار دائن", "Credit note")}</button>}
         {balance > 0 && inv.doc_type !== "credit_note" && can("finance.manage") && <button className="btn no-print" onClick={() => go(`/finance/payments?invoice=${inv.id}`)}>{t("تسجيل تحصيل", "Record receipt")}</button>}
-        <button className="btn primary no-print" onClick={() => window.print()}>{t("طباعة", "Print")}</button>
+        <button className="btn no-print" onClick={() => window.print()}>{t("طباعة", "Print")}</button>
+        <button className="btn no-print" onClick={onShare} disabled={busy}>{t("مشاركة", "Share")}</button>
+        <button className="btn primary no-print" onClick={onPdf} disabled={busy}>{busy ? t("جارِ التجهيز…", "Preparing…") : t("تنزيل PDF", "Download PDF")}</button>
       </PageHead>
-      <div className="panel doc">
-        <div className="doc-head">
-          <div>
-            <div className="title">{titles[inv.doc_type]}</div>
-            <div className="muted">{inv.doc_type !== "invoice" ? "Credit/Debit note" : inv.invoice_kind === "standard" ? "Tax Invoice" : "Simplified Tax Invoice"}</div>
-            <div style={{ marginTop: 8 }}>{t("رقم", "No.")}: <b className="mono">{inv.number}</b></div>
-            <div>{t("تاريخ الإصدار", "Issue date")}: <DateText v={inv.issue_date} /> {String(inv.issue_time || "").slice(0, 5)}</div>
-            {inv.supply_date && <div>{t("تاريخ التوريد", "Supply date")}: <DateText v={inv.supply_date} /></div>}
-            {inv.ref?.number && <div>{t("مرجع الفاتورة الأصلية", "Original invoice")}: <span className="mono">{inv.ref.number}</span> — {inv.reason}</div>}
-          </div>
-          {qrImg ? <img src={qrImg} alt="ZATCA QR" width={140} height={140} /> : <div className="badge bad">{t("QR غير متوفر", "No QR")}</div>}
-        </div>
-        <div className="parties">
-          <div className="box"><h3>{t("البائع", "Seller")}</h3>
-            <div><b>{org.legal_name || org.name_ar}</b></div>
-            <div>{t("الرقم الضريبي", "VAT")}: <span className="mono">{org.vat_number}</span></div>
-            {org.cr_number && <div>{t("س.ت", "CR")}: <span className="mono">{org.cr_number}</span></div>}
-            <div className="muted">{[org.building_no, org.street, org.district, org.city, org.postal_code].filter(Boolean).join("، ")}</div>
-          </div>
-          <div className="box"><h3>{t("المشتري", "Buyer")}</h3>
-            {c ? <>
-              <div><b>{c.name_ar}</b></div>
-              {c.vat_number && <div>{t("الرقم الضريبي", "VAT")}: <span className="mono">{c.vat_number}</span></div>}
-              <div className="muted">{[c.building_no, c.street, c.district, c.city, c.postal_code].filter(Boolean).join("، ")}</div>
-            </> : <div className="muted">{t("عميل نقدي", "Cash customer")}</div>}
-            {inv.projects && <div style={{ marginTop: 6 }}>{t("المشروع", "Project")}: {inv.projects.name_ar}</div>}
-          </div>
-        </div>
-        <table className="tbl">
-          <thead><tr><th>#</th><th>{t("الوصف", "Description")}</th><th className="n">{t("الكمية", "Qty")}</th><th className="n">{t("سعر الوحدة", "Unit price")}</th>
-            <th className="n">{t("خصم", "Discount")}</th><th className="n">{t("الضريبة %", "VAT %")}</th><th className="n">{t("الضريبة", "VAT")}</th><th className="n">{t("الإجمالي", "Total")}</th></tr></thead>
-          <tbody>{inv.lines.map((l, k) => (
-            <tr key={l.id}><td>{k + 1}</td><td>{l.description}</td><td className="n">{Number(l.quantity)}</td><td className="n">{num(l.unit_price)}</td>
-              <td className="n">{Number(l.discount) ? num(l.discount) : "—"}</td><td className="n">{Number(l.tax_rate)}%</td><td className="n">{num(l.line_vat)}</td><td className="n">{num(l.line_total)}</td></tr>))}
-          </tbody>
-        </table>
-        <div className="totals">
-          <div><span>{t("الإجمالي قبل الضريبة", "Total excl. VAT")}</span><Money v={inv.subtotal} /></div>
-          {Number(inv.advance_deduction) > 0 && <div><span>{t("استرداد دفعة مقدمة", "Advance recovery")}</span><Money v={-inv.advance_deduction} /></div>}
-          <div><span>{t("المبلغ الخاضع للضريبة", "Taxable amount")}</span><Money v={inv.taxable_amount} /></div>
-          <div><span>{t("ضريبة القيمة المضافة", "VAT")}</span><Money v={inv.vat_amount} /></div>
-          <div className="grand"><span>{t("الإجمالي شامل الضريبة", "Total incl. VAT")}</span><Money v={inv.total} /></div>
-          {Number(inv.retention_amount) > 0 && <>
-            <div><span>{t("محتجزات ضمان", "Retention")}</span><Money v={-inv.retention_amount} /></div>
-            <div className="grand"><span>{t("صافي المستحق", "Net payable")}</span><Money v={inv.net_payable} /></div></>}
-        </div>
-        {inv.notes && <p className="muted">{inv.notes}</p>}
-      </div>
+      <A4Viewer><InvoiceDocument ref={docRef} inv={inv} org={org} qrImg={qrImg} /></A4Viewer>
       <div className="grid c2 no-print" style={{ marginTop: 16 }}>
         <Panel title="ZATCA">
           <div className="grid" style={{ gap: 6 }}>
