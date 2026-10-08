@@ -64,7 +64,7 @@ h3 { font-size: 14px; }
 
 /* ── page ── */
 .page-head { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; flex-wrap: wrap; }
-.page-head .grow { flex: 1; }
+.page-head .grow { flex: 1; min-width: 240px; }
 .page-head .sub { color: var(--muted); font-size: 13px; margin-top: 2px; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); box-shadow: var(--shadow); }
 .panel + .panel { margin-top: 16px; }
@@ -172,4 +172,61 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .content { padding: 0; max-width: none; }
   .panel { border: none; box-shadow: none; }
   body { background: #fff; }
+}
+
+/* ── A4 document (invoice) — fixed 794px ≈ 210mm at 96dpi ── */
+.a4-viewer { width: 100%; overflow: hidden; }
+.a4 { width: 794px; min-height: 1123px; background: #fff; color: #111; padding: 36px 40px 28px; font-size: 12px; line-height: 1.5;
+  display: flex; flex-direction: column; box-shadow: var(--shadow); border-radius: 4px; position: relative; }
+.a4::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: 0; width: 8px; background: var(--accent); border-radius: 0 4px 4px 0; }
+.a4 .ltr { direction: ltr; unicode-bidi: isolate; }
+.a4 .muted { color: #6b6b6b; }
+.a4 .bi { display: inline-flex; flex-direction: column; line-height: 1.15; }
+.a4 .bi { text-align: right; }
+.a4-lines th .bi { text-align: center; }
+.a4 .bi small { text-align: inherit; font-size: 9px; color: #7a7a7a; font-weight: 500; letter-spacing: .02em; }
+.a4-head { display: flex; justify-content: space-between; gap: 20px; padding-bottom: 16px; border-bottom: 3px solid var(--accent); }
+.a4-org { display: flex; gap: 14px; align-items: flex-start; }
+.a4-logo { width: 78px; height: 78px; object-fit: contain; }
+.a4-org-name { font-size: 18px; font-weight: 700; }
+.a4-org-en { font-size: 12px; color: #555; direction: ltr; text-align: right; }
+.a4-meta { font-size: 11px; color: #444; display: flex; gap: 12px; flex-wrap: wrap; margin-top: 3px; }
+.a4-title-box { text-align: left; display: flex; flex-direction: column; align-items: flex-end; min-width: 170px; }
+.a4-title { font-size: 22px; font-weight: 700; }
+.a4-title-en { font-size: 12px; color: #8a6a1f; letter-spacing: .06em; text-transform: uppercase; margin-bottom: 8px; }
+.a4-qr { width: 118px; height: 118px; }
+.a4-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin: 16px 0; }
+.a4-box { border: 1px solid #e3e3e3; border-radius: 6px; overflow: hidden; }
+.a4-box-h { background: #f6f6f6; padding: 6px 10px; font-weight: 700; border-bottom: 1px solid #e3e3e3; }
+.a4-kv { width: 100%; border-collapse: collapse; }
+.a4-kv th { width: 36%; text-align: start; font-weight: 600; padding: 5px 10px; vertical-align: top; color: #333; }
+.a4-kv td { padding: 5px 10px; }
+.a4-kv tr + tr th, .a4-kv tr + tr td { border-top: 1px solid #f0f0f0; }
+.a4-lines { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+.a4-lines th { background: #111; color: #fff; padding: 7px 6px; text-align: center; font-weight: 600; }
+.a4-lines th .bi small { color: #ffce08; }
+.a4-lines td { padding: 7px 6px; border-bottom: 1px solid #ececec; text-align: center; }
+.a4-lines .desc { text-align: start; }
+.a4-lines td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.a4-lines small { color: #777; font-size: 10px; }
+.a4-lines tbody tr:nth-child(even) td { background: #fafafa; }
+.a4-bottom { display: grid; grid-template-columns: 1fr 300px; gap: 16px; align-items: start; }
+.a4-words { border: 1px solid #e3e3e3; border-radius: 6px; overflow: hidden; }
+.a4-words p { margin: 0; padding: 7px 10px; }
+.a4-totals { width: 100%; border-collapse: collapse; border: 1px solid #e3e3e3; }
+.a4-totals th { text-align: start; padding: 6px 10px; font-weight: 600; }
+.a4-totals td { text-align: left; direction: ltr; padding: 6px 10px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.a4-totals tr + tr th, .a4-totals tr + tr td { border-top: 1px solid #efefef; }
+.a4-totals .grand th, .a4-totals .grand td { background: #111; color: #fff; font-size: 14px; font-weight: 700; }
+.a4-totals .grand .bi small { color: #ffce08; }
+.a4-foot { margin-top: auto; padding-top: 14px; border-top: 2px solid #111; text-align: center; font-size: 11px; color: #444; }
+.a4-foot-note { font-weight: 600; color: #111; margin-bottom: 4px; }
+.a4-contact { display: flex; justify-content: center; gap: 16px; flex-wrap: wrap; }
+.a4-gen { margin-top: 6px; font-size: 9px; color: #a0a0a0; letter-spacing: .04em; }
+@media print {
+  @page { size: A4; margin: 0; }
+  .a4-viewer { height: auto !important; overflow: visible; }
+  .a4-scale { transform: none !important; }
+  .a4 { box-shadow: none; border-radius: 0; min-height: 297mm; }
+  .page-head, .no-print { display: none !important; }
 }

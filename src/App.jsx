@@ -111,6 +111,7 @@ export default function App() {
         <div className="main">
           <div className="top">
             <button className="btn ghost menu-btn" onClick={() => setMenuOpen(true)} aria-label="menu">☰</button>
+            {org.logo_data && <img src={org.logo_data} alt="" style={{ width: 30, height: 30, objectFit: "contain" }} />}
             <select style={{ width: "auto", maxWidth: 260 }} value={org.id}
                     onChange={(e) => selectOrg(e.target.value).then(() => go("/")).catch(toasts.notifyError)}>
               {orgs.map((o) => <option key={o.org_id} value={o.org_id}>{lang === "en" && o.name_en ? o.name_en : o.name_ar}</option>)}

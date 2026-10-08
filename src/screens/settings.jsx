@@ -2,7 +2,8 @@ import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { RecordForm } from "../crud.jsx";
 import { useApp, useData, useAction, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading } from "../ui.jsx";
-import { isVatNumber } from "../lib/format.js";
+import { isVatNumber, isSaIban } from "../lib/format.js";
+import { imageFileToDataUrl } from "../lib/pdf.js";
 
 /* ── company ─────────────────────────────────────────────────────────── */
 export function Company() {
@@ -21,15 +22,41 @@ export function Company() {
     { key: "street", label: t("الشارع", "Street") }, { key: "building_no", label: t("رقم المبنى", "Building no."), ltr: true },
     { key: "district", label: t("الحي", "District") }, { key: "city", label: t("المدينة", "City") },
     { key: "postal_code", label: t("الرمز البريدي", "Postal code"), ltr: true },
+    { section: t("التواصل والبنك (تظهر على الفواتير)", "Contact & bank (printed on invoices)") },
+    { key: "phone", label: t("الهاتف", "Phone"), ltr: true }, { key: "email", label: t("البريد الإلكتروني", "E-mail"), type: "email", ltr: true },
+    { key: "website", label: t("الموقع الإلكتروني", "Website"), ltr: true },
+    { key: "bank_name", label: t("البنك", "Bank") },
+    { key: "iban", label: t("الآيبان", "IBAN"), ltr: true, transform: (v) => (v || "").replace(/\s/g, "").toUpperCase() || null,
+      hint: f.iban && !isSaIban(f.iban) ? t("SA متبوعاً بـ 22 رقماً", "SA followed by 22 digits") : null },
+    { key: "invoice_footer", label: t("عبارة أسفل الفاتورة", "Invoice footer note"), wide: true, placeholder: t("مثال: شكراً لتعاملكم معنا", "e.g. Thank you for your business") },
   ];
+  async function onLogo(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    const data = await act(() => imageFileToDataUrl(file, 512));
+    if (data) setF((x) => ({ ...x, logo_data: data }));
+  }
   async function save(e) {
     e.preventDefault();
-    const rec = {}; for (const x of fields) if (x.key) rec[x.key] = f[x.key] ?? null;
+    const rec = { logo_data: f.logo_data ?? null }; for (const x of fields) if (x.key) rec[x.key] = f[x.key] ?? null;
     if (await act(async () => { await run(supabase.from("organizations").update(rec).eq("id", org.id)); return true; }, t("تم الحفظ", "Saved"))) refreshOrg();
   }
   return (
     <>
       <PageHead title={t("بيانات الشركة", "Company")}><button className="btn primary" form="org" disabled={busy}>{t("حفظ", "Save")}</button></PageHead>
+      <Panel title={t("شعار الشركة", "Company logo")}>
+        <div className="row" style={{ gap: 16 }}>
+          <div style={{ width: 96, height: 96, border: "1px dashed var(--line)", borderRadius: 10, display: "grid", placeItems: "center", background: "#fff" }}>
+            {f.logo_data ? <img src={f.logo_data} alt="" style={{ maxWidth: 88, maxHeight: 88, objectFit: "contain" }} /> : <span className="muted" style={{ fontSize: 12 }}>{t("بدون شعار", "No logo")}</span>}
+          </div>
+          <div className="grid" style={{ gap: 8 }}>
+            <label className="btn">{t("اختيار صورة…", "Choose image…")}<input type="file" accept="image/png,image/jpeg,image/webp" hidden onChange={onLogo} /></label>
+            {f.logo_data && <button type="button" className="btn ghost sm" onClick={() => setF({ ...f, logo_data: null })}>{t("إزالة الشعار", "Remove logo")}</button>}
+            <span className="muted" style={{ fontSize: 12 }}>{t("يظهر على الفواتير وملفات PDF. يُفضّل PNG بخلفية شفافة. اضغط «حفظ» بعد الاختيار.", "Shown on invoices and PDFs. A transparent PNG works best. Press Save afterwards.")}</span>
+          </div>
+        </div>
+      </Panel>
       <Panel><form id="org" onSubmit={save}><RecordForm fields={fields} value={f} onChange={setF} /></form></Panel>
       <Panel title={t("الفوترة الإلكترونية (ZATCA)", "E-invoicing (ZATCA)")}>
         <div className="grid" style={{ gap: 6 }}>
