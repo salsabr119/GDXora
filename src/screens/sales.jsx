@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
-import { useApp, useData, useAction, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Select, go, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Select, go, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { processInvoice } from "../lib/zatca/index.js";
 import { today, num, isVatNumber } from "../lib/format.js";
@@ -31,20 +31,20 @@ export function Customers() {
       { key: "customer_type", label: t("النوع", "Type"), type: "select", options: [
         { id: "business", label: t("منشأة", "Business") }, { id: "government", label: t("جهة حكومية", "Government") },
         { id: "individual", label: t("فرد", "Individual") }] },
-      { key: "vat_number", label: t("الرقم الضريبي", "VAT number"), ltr: true, hint: t("إلزامي للفواتير الضريبية للمنشآت", "Required on B2B tax invoices") },
+      { key: "vat_number", label: t("الرقم الضريبي", "VAT number"), ltr: true, hint: t("إلزامي للفواتير الضريبية للمنشآت", "Required on B2B tax invoices"), validate: (v) => (isVatNumber(v) ? null : t("الرقم الضريبي غير صحيح — 15 رقماً يبدأ وينتهي بـ 3", "Invalid VAT number — 15 digits starting and ending with 3")) },
       { key: "cr_number", label: t("السجل التجاري", "CR number"), ltr: true },
       { key: "phone", label: t("الجوال", "Phone"), type: "tel", ltr: true },
       { key: "email", label: t("البريد", "E-mail"), type: "email", ltr: true },
       { section: t("العنوان الوطني (إلزامي للفاتورة الضريبية)", "National address (required on tax invoices)") },
       { key: "street", label: t("الشارع", "Street") },
-      { key: "building_no", label: t("رقم المبنى", "Building no."), ltr: true },
+      { key: "building_no", label: t("رقم المبنى", "Building no."), ltr: true, validate: (v) => (/^\d{4}$/.test(v) ? null : t("رقم المبنى في العنوان الوطني 4 أرقام", "Building number is 4 digits")) },
       { key: "district", label: t("الحي", "District") },
       { key: "city", label: t("المدينة", "City") },
-      { key: "postal_code", label: t("الرمز البريدي", "Postal code"), ltr: true },
+      { key: "postal_code", label: t("الرمز البريدي", "Postal code"), ltr: true, validate: (v) => (/^\d{5}$/.test(v) ? null : t("الرمز البريدي 5 أرقام", "Postal code is 5 digits")) },
       { key: "country", label: t("الدولة", "Country"), ltr: true },
       { section: t("الائتمان", "Credit") },
       { key: "payment_terms_days", label: t("مدة السداد (يوم)", "Payment terms (days)"), type: "number" },
-      { key: "credit_limit", label: t("حد الائتمان", "Credit limit"), type: "money" },
+      { key: "credit_limit", label: t("حد الائتمان", "Credit limit"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
       { key: "active", label: t("نشط", "Active"), type: "checkbox" },
       { key: "notes", label: t("ملاحظات", "Notes"), type: "textarea", wide: true },
     ],
@@ -69,7 +69,7 @@ export function Items() {
       { key: "name_en", label: t("الاسم (إنجليزي)", "Name (English)"), ltr: true },
       { key: "kind", label: t("النوع", "Kind"), type: "select", options: [{ id: "service", label: t("خدمة", "Service") }, { id: "goods", label: t("سلعة", "Goods") }] },
       { key: "unit", label: t("الوحدة", "Unit") },
-      { key: "unit_price", label: t("سعر الوحدة", "Unit price"), type: "money" },
+      { key: "unit_price", label: t("سعر الوحدة", "Unit price"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
       { key: "tax_code_id", label: t("رمز الضريبة", "Tax code"), type: "select", options: (lk) => lk.tax || [] },
       { key: "revenue_account_id", label: t("حساب الإيراد", "Revenue account"), type: "select", options: (lk) => lk.rev || [] },
       { key: "active", label: t("نشط", "Active"), type: "checkbox" },
@@ -140,6 +140,7 @@ export function InvoiceEditor({ params }) {
   const { t, can, org, lang } = useApp();
   const isNew = params.id === "new";
   const [act, busy] = useAction();
+  const v = useIssues();
   const lk = useData(async () => ({
     customers: await L.customers(), projects: await L.projects(), items: await L.items(), tax: await L.taxCodes(),
     invoices: await run(supabase.from("invoices").select("id, number, customer_id").eq("status", "issued").eq("doc_type", "invoice").order("issue_date", { ascending: false }).limit(300)),
@@ -185,8 +186,40 @@ export function InvoiceEditor({ params }) {
   const vat = calc.reduce((n, c) => n + c.vat, 0);
   const setLine = (k, patch) => setForm({ ...form, lines: lines.map((l, j) => (j === k ? { ...l, ...patch } : l)) });
   const customer = lk.data.customers.find((c) => c.id === form.customer_id);
-  const warnB2B = form.invoice_kind === "standard" && customer &&
-    ((customer.customer_type === "business" && !isVatNumber(customer.vat_number)) || !customer.street || !customer.building_no || !customer.postal_code || !customer.district);
+
+  // what is missing — `issuing` adds the ZATCA requirements for a tax invoice
+  function problems(issuing) {
+    const out = [];
+    lines.forEach((l, k) => {
+      const n = k + 1, started = l.description || Number(l.unit_price) || l.item_id;
+      if (!started) return;
+      if (!String(l.description || "").trim()) out.push({ key: `line${k}`, msg: t(`البند ${n}: أدخل الوصف`, `Line ${n}: enter a description`) });
+      if (!(Number(l.quantity) > 0)) out.push({ key: `line${k}`, msg: t(`البند ${n}: الكمية يجب أن تكون أكبر من صفر`, `Line ${n}: quantity must be above zero`) });
+      if (Number(l.unit_price) < 0) out.push({ key: `line${k}`, msg: t(`البند ${n}: السعر لا يكون سالباً`, `Line ${n}: price cannot be negative`) });
+      if (Number(l.discount) > Number(l.quantity || 0) * Number(l.unit_price || 0)) out.push({ key: `line${k}`, msg: t(`البند ${n}: الخصم أكبر من قيمة البند`, `Line ${n}: discount exceeds the line amount`) });
+    });
+    if (!lines.some((l) => String(l.description || "").trim() && Number(l.quantity) > 0)) out.push(t("أضف بنداً واحداً على الأقل (وصف + كمية + سعر)", "Add at least one line (description, quantity, price)"));
+    if (form.doc_type !== "invoice") {
+      if (!form.ref_invoice_id) out.push({ key: "ref", msg: t("اختر الفاتورة الأصلية التي يعدّلها الإشعار", "Choose the original invoice this note adjusts") });
+      if (!String(form.reason || "").trim()) out.push({ key: "reason", msg: t("أدخل سبب الإشعار", "Enter the reason for the note") });
+    }
+    if (Number(form.retention_amount) < 0) out.push({ key: "retention", msg: t("المحتجزات لا تكون سالبة", "Retention cannot be negative") });
+    if (issuing) {
+      if (!org.vat_number) out.push(t("أدخل الرقم الضريبي للشركة من «الإعدادات ← بيانات الشركة»", "Add the company VAT number in Settings → Company"));
+      if (!org.street || !org.building_no || !org.city || !org.postal_code) out.push(t("أكمل العنوان الوطني للشركة من «الإعدادات ← بيانات الشركة»", "Complete the company national address in Settings → Company"));
+      if (sub + vat <= 0) out.push(t("إجمالي الفاتورة يجب أن يكون أكبر من صفر", "The invoice total must be above zero"));
+      if (form.invoice_kind === "standard") {
+        if (!customer) out.push({ key: "customer", msg: t("الفاتورة الضريبية (B2B) تتطلب اختيار العميل — أو اختر «مبسطة»", "A standard (B2B) invoice needs a customer — or choose simplified") });
+        else {
+          if (customer.customer_type === "business" && !isVatNumber(customer.vat_number)) out.push({ key: "customer", msg: t(`العميل «${customer.name_ar}» بدون رقم ضريبي صحيح — أكمله من شاشة العملاء`, `Customer "${customer.name_ar}" has no valid VAT number`) });
+          const miss = [[customer.street, t("الشارع", "street")], [customer.building_no, t("رقم المبنى", "building no.")], [customer.district, t("الحي", "district")],
+                        [customer.city, t("المدينة", "city")], [customer.postal_code, t("الرمز البريدي", "postal code")]].filter(([x]) => !x).map(([, n]) => n);
+          if (miss.length) out.push({ key: "customer", msg: t(`العنوان الوطني للعميل ناقص: ${miss.join("، ")}`, `Customer national address is missing: ${miss.join(", ")}`) });
+        }
+      }
+    }
+    return out;
+  }
 
   async function save() {
     const header = {
@@ -208,10 +241,12 @@ export function InvoiceEditor({ params }) {
     return id;
   }
   async function onSave() {
+    if (!v.check(problems(false))) return;
     const id = await act(save, t("تم الحفظ", "Saved"));
     if (id && isNew) go(`/sales/invoices/${id}`); else if (id) { setForm(null); inv.reload(); }
   }
   async function onIssue() {
+    if (!v.check(problems(true))) return;
     if (!window.confirm(t("إصدار الفاتورة؟ بعد الإصدار لا يمكن تعديلها (التصحيح بإشعار دائن/مدين فقط).",
                           "Issue the invoice? It becomes immutable (corrections via credit/debit notes only)."))) return;
     const id = await act(async () => {
@@ -234,11 +269,9 @@ export function InvoiceEditor({ params }) {
         <button className="btn" onClick={() => go("/sales/invoices")}>{t("رجوع", "Back")}</button>
         {!isNew && can("sales.manage") && <button className="btn danger" onClick={onDelete} disabled={busy}>{t("حذف", "Delete")}</button>}
         {can("sales.manage") && <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>}
-        {can("sales.issue") && <button className="btn primary" onClick={onIssue} disabled={busy || sub <= 0 || !org.vat_number}>{t("إصدار الفاتورة", "Issue invoice")}</button>}
+        {can("sales.issue") && <button className="btn primary" onClick={onIssue} disabled={busy}>{t("إصدار الفاتورة", "Issue invoice")}</button>}
       </PageHead>
-      {!org.vat_number && <div className="alert warn">{t("لا يمكن الإصدار قبل إدخال الرقم الضريبي للشركة.", "Add the company VAT number before issuing.")} <a href="#/settings/company">{t("الإعدادات", "Settings")}</a></div>}
-      {warnB2B && <div className="alert warn">{t("الفاتورة الضريبية (B2B) تتطلب الرقم الضريبي والعنوان الوطني الكامل للعميل — أكملها من شاشة العملاء أو اختر فاتورة مبسطة.",
-        "A standard (B2B) invoice needs the customer's VAT number and full national address — complete the customer or use a simplified invoice.")}</div>}
+      <Issues issues={v.issues} />
       <Panel>
         <div className="form">
           <Field label={t("نوع المستند", "Document")}>
@@ -249,15 +282,15 @@ export function InvoiceEditor({ params }) {
             <select value={form.invoice_kind} onChange={(e) => setForm({ ...form, invoice_kind: e.target.value })}>
               <option value="standard">{t("ضريبية (منشآت B2B)", "Standard (B2B)")}</option><option value="simplified">{t("مبسطة (أفراد B2C)", "Simplified (B2C)")}</option>
             </select></Field>
-          <Field label={t("العميل", "Customer")} required={form.invoice_kind === "standard"}>
+          <Field label={t("العميل", "Customer")} required={form.invoice_kind === "standard"} invalid={v.has("customer")}>
             <Select value={form.customer_id} onChange={(v) => setForm({ ...form, customer_id: v })} options={lk.data.customers} /></Field>
           <Field label={t("المشروع", "Project")}>
             <Select value={form.project_id} onChange={(v) => setForm({ ...form, project_id: v })} options={lk.data.projects} /></Field>
           {form.doc_type !== "invoice" && <>
-            <Field label={t("الفاتورة الأصلية", "Original invoice")} required>
+            <Field label={t("الفاتورة الأصلية", "Original invoice")} required invalid={v.has("ref")}>
               <Select value={form.ref_invoice_id} onChange={(v) => setForm({ ...form, ref_invoice_id: v })}
                       options={lk.data.invoices.filter((x) => !form.customer_id || x.customer_id === form.customer_id).map((x) => ({ id: x.id, label: x.number }))} /></Field>
-            <Field label={t("سبب الإشعار", "Reason")} required><input value={form.reason || ""} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></Field>
+            <Field label={t("سبب الإشعار", "Reason")} required invalid={v.has("reason")}><input value={form.reason || ""} onChange={(e) => setForm({ ...form, reason: e.target.value })} /></Field>
           </>}
           <Field label={t("تاريخ الإصدار", "Issue date")}><input type="date" value={form.issue_date || ""} onChange={(e) => setForm({ ...form, issue_date: e.target.value })} /></Field>
           <Field label={t("تاريخ التوريد", "Supply date")}><input type="date" value={form.supply_date || ""} onChange={(e) => setForm({ ...form, supply_date: e.target.value })} /></Field>
@@ -275,7 +308,7 @@ export function InvoiceEditor({ params }) {
               <th className="n">{t("الكمية", "Qty")}</th><th className="n">{t("السعر", "Price")}</th><th className="n">{t("خصم", "Discount")}</th>
               <th style={{ minWidth: 150 }}>{t("الضريبة", "Tax")}</th><th className="n">{t("الصافي", "Net")}</th><th className="n">{t("الضريبة", "VAT")}</th><th /></tr></thead>
             <tbody>{lines.map((l, k) => (
-              <tr key={k}>
+              <tr key={k} className={v.has(`line${k}`) ? "invalid" : ""}>
                 <td><select value={l.item_id || ""} onChange={(e) => {
                   const it = lk.data.items.find((x) => x.id === e.target.value);
                   setLine(k, it ? { item_id: it.id, description: it.name_ar, unit: it.unit, unit_price: it.unit_price, tax_code_id: it.tax_code_id || std } : { item_id: null });

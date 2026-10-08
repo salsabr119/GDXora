@@ -125,9 +125,9 @@ export function Badge({ kind = "", children }) {
   return <span className={`badge ${kind}`}>{children}</span>;
 }
 
-export function Field({ label, required, hint, children, wide }) {
+export function Field({ label, required, hint, children, wide, invalid }) {
   return (
-    <div className={`field ${wide ? "wide" : ""}`}>
+    <div className={`field ${wide ? "wide" : ""} ${invalid ? "invalid" : ""}`}>
       {label && <label>{label}{required && <span className="req"> *</span>}</label>}
       {children}
       {hint && <span className="hint">{hint}</span>}
@@ -193,6 +193,36 @@ export function Loading() {
     <div className="empty">
       {slow ? <>{t("تعذّر تحميل البيانات.", "Could not load the data.")} <button className="btn sm" onClick={() => window.location.reload()}>{t("إعادة المحاولة", "Retry")}</button></>
             : t("جارِ التحميل…", "Loading…")}
+    </div>
+  );
+}
+
+/* ── validation messages ─────────────────────────────────────────────
+   Every "submit" checks its inputs first; when something is missing the
+   user sees a red box listing exactly what to complete (never a silently
+   disabled button). An issue is a string or { key, msg } — key highlights
+   the matching field / line. */
+export function useIssues() {
+  const [issues, setIssues] = useState([]);
+  const check = useCallback((list) => {
+    const clean = (list || []).filter(Boolean).map((i) => (typeof i === "string" ? { msg: i } : i));
+    setIssues(clean);
+    return clean.length === 0;
+  }, []);
+  const clear = useCallback(() => setIssues([]), []);
+  const has = useCallback((key) => issues.some((i) => i.key === key), [issues]);
+  return { issues, check, clear, has };
+}
+
+export function Issues({ issues, title }) {
+  const { t } = useApp();
+  const ref = useRef(null);
+  useEffect(() => { if (issues?.length) ref.current?.scrollIntoView({ behavior: "smooth", block: "center" }); }, [issues]);
+  if (!issues?.length) return null;
+  return (
+    <div className="alert bad issues" role="alert" ref={ref}>
+      <b>{title || t("الرجاء إكمال ما يلي قبل المتابعة:", "Please complete the following first:")}</b>
+      <ul>{issues.map((i, k) => <li key={k}>{i.msg}</li>)}</ul>
     </div>
   );
 }
