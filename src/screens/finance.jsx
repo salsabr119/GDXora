@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
-import { Resource, RecordForm } from "../crud.jsx";
-import { useApp, useData, useAction, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Tabs, Select, go, Loading } from "../ui.jsx";
+import { Resource, RecordForm, validateRecord } from "../crud.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Tabs, Select, go, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
-import { today, num, downloadCsv } from "../lib/format.js";
+import { today, num, downloadCsv, isVatNumber, isSaIban } from "../lib/format.js";
 import { DateRange } from "./accounting.jsx";
 
 /* ── vendors ─────────────────────────────────────────────────────────── */
@@ -25,13 +25,13 @@ export function Vendors() {
       { key: "vendor_type", label: t("النوع", "Type"), type: "select", options: [
         { id: "supplier", label: t("مورد", "Supplier") }, { id: "subcontractor", label: t("مقاول باطن", "Subcontractor") },
         { id: "service", label: t("خدمات", "Services") }, { id: "government", label: t("جهة حكومية", "Government") }] },
-      { key: "vat_number", label: t("الرقم الضريبي", "VAT number"), ltr: true },
+      { key: "vat_number", label: t("الرقم الضريبي", "VAT number"), ltr: true, validate: (v) => (isVatNumber(v) ? null : t("الرقم الضريبي غير صحيح — 15 رقماً يبدأ وينتهي بـ 3", "Invalid VAT number — 15 digits starting and ending with 3")) },
       { key: "cr_number", label: t("السجل التجاري", "CR number"), ltr: true },
       { key: "phone", label: t("الجوال", "Phone"), ltr: true },
       { key: "email", label: t("البريد", "E-mail"), type: "email", ltr: true },
       { key: "city", label: t("المدينة", "City") },
       { key: "address", label: t("العنوان", "Address") },
-      { key: "iban", label: t("الآيبان", "IBAN"), ltr: true },
+      { key: "iban", label: t("الآيبان", "IBAN"), ltr: true, validate: (v) => (isSaIban(v) ? null : t("الآيبان غير صحيح — SA متبوعاً بـ 22 رقماً", "Invalid IBAN — SA followed by 22 digits")) },
       { key: "payment_terms_days", label: t("مدة السداد (يوم)", "Payment terms (days)"), type: "number" },
       { key: "active", label: t("نشط", "Active"), type: "checkbox" },
       { key: "notes", label: t("ملاحظات", "Notes"), type: "textarea", wide: true },
@@ -71,6 +71,7 @@ export function BillEditor({ params }) {
   const { t, can } = useApp();
   const isNew = params.id === "new";
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [form, setForm] = useState(null);
   const lk = useData(async () => ({
     vendors: await L.vendors(), projects: await L.projects(), tax: await L.taxCodes(),
@@ -124,6 +125,24 @@ export function BillEditor({ params }) {
   const sub = calc.reduce((n, c) => n + c.net, 0), vat = calc.reduce((n, c) => n + c.vat, 0);
   const setLine = (k, patch) => setForm({ ...form, lines: lines.map((l, j) => (j === k ? { ...l, ...patch } : l)) });
 
+  function problems(posting) {
+    const out = [];
+    if (!form.vendor_id) out.push({ key: "vendor", msg: t("اختر المورد", "Choose the vendor") });
+    if (!form.bill_date) out.push({ key: "date", msg: t("أدخل تاريخ الفاتورة", "Enter the bill date") });
+    lines.forEach((l, k) => {
+      const n = k + 1, started = l.description || l.account_id || Number(l.unit_price);
+      if (!started) return;
+      if (!String(l.description || "").trim()) out.push({ key: `line${k}`, msg: t(`البند ${n}: أدخل الوصف`, `Line ${n}: enter a description`) });
+      if (!l.account_id) out.push({ key: `line${k}`, msg: t(`البند ${n}: اختر حساب المصروف أو التكلفة`, `Line ${n}: choose the expense/cost account`) });
+      if (!(Number(l.quantity) > 0)) out.push({ key: `line${k}`, msg: t(`البند ${n}: الكمية يجب أن تكون أكبر من صفر`, `Line ${n}: quantity must be above zero`) });
+      if (Number(l.unit_price) < 0) out.push({ key: `line${k}`, msg: t(`البند ${n}: السعر لا يكون سالباً`, `Line ${n}: price cannot be negative`) });
+    });
+    if (!lines.some((l) => String(l.description || "").trim() && l.account_id)) out.push(t("أضف بنداً واحداً على الأقل (وصف + حساب + مبلغ)", "Add at least one line (description, account, amount)"));
+    if (posting && sub + vat <= 0) out.push(t("إجمالي الفاتورة يجب أن يكون أكبر من صفر", "The bill total must be above zero"));
+    if (Number(form.retention_amount) < 0) out.push({ key: "retention", msg: t("المحتجزات لا تكون سالبة", "Retention cannot be negative") });
+    if (Number(form.retention_amount) > sub + vat) out.push({ key: "retention", msg: t("المحتجزات أكبر من إجمالي الفاتورة", "Retention exceeds the bill total") });
+    return out;
+  }
   async function save() {
     const header = { vendor_id: form.vendor_id, vendor_ref: form.vendor_ref || null, project_id: form.project_id || null, bill_date: form.bill_date,
                      due_date: form.due_date || null, retention_amount: Number(form.retention_amount || 0), notes: form.notes || null };
@@ -138,8 +157,8 @@ export function BillEditor({ params }) {
     return id;
   }
   const after = (id) => { if (isNew) go(`/finance/bills/${id}`); else { setForm(null); bill.reload(); } };
-  async function onSave() { const id = await act(save, t("تم الحفظ", "Saved")); if (id) after(id); }
-  async function onPost() { const id = await act(async () => { const id = await save(); await rpc("post_bill", { p_bill: id }); return id; }, t("تم ترحيل الفاتورة", "Bill posted")); if (id) after(id); }
+  async function onSave() { if (!iss.check(problems(false))) return; const id = await act(save, t("تم الحفظ", "Saved")); if (id) after(id); }
+  async function onPost() { if (!iss.check(problems(true))) return; const id = await act(async () => { const id = await save(); await rpc("post_bill", { p_bill: id }); return id; }, t("تم ترحيل الفاتورة", "Bill posted")); if (id) after(id); }
 
   return (
     <>
@@ -147,22 +166,23 @@ export function BillEditor({ params }) {
         <button className="btn" onClick={() => go("/finance/bills")}>{t("رجوع", "Back")}</button>
         {!isNew && <button className="btn danger" disabled={busy} onClick={async () => { if (window.confirm(t("حذف المسودة؟", "Delete draft?")) && await act(async () => { await run(supabase.from("bills").delete().eq("id", params.id)); return true; })) go("/finance/bills"); }}>{t("حذف", "Delete")}</button>}
         <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>
-        {can("finance.approve") && <button className="btn primary" onClick={onPost} disabled={busy || sub <= 0}>{t("ترحيل", "Post")}</button>}
+        {can("finance.approve") && <button className="btn primary" onClick={onPost} disabled={busy}>{t("ترحيل", "Post")}</button>}
       </PageHead>
+      <Issues issues={iss.issues} />
       <Panel><div className="form">
-        <Field label={t("المورد", "Vendor")} required><Select value={form.vendor_id} onChange={(v) => setForm({ ...form, vendor_id: v })} options={lk.data.vendors} /></Field>
+        <Field label={t("المورد", "Vendor")} required invalid={iss.has("vendor")}><Select value={form.vendor_id} onChange={(v) => setForm({ ...form, vendor_id: v })} options={lk.data.vendors} /></Field>
         <Field label={t("رقم فاتورة المورد", "Vendor invoice no.")}><input value={form.vendor_ref || ""} onChange={(e) => setForm({ ...form, vendor_ref: e.target.value })} /></Field>
         <Field label={t("المشروع", "Project")}><Select value={form.project_id} onChange={(v) => setForm({ ...form, project_id: v })} options={lk.data.projects} /></Field>
-        <Field label={t("التاريخ", "Date")}><input type="date" value={form.bill_date} onChange={(e) => setForm({ ...form, bill_date: e.target.value })} /></Field>
+        <Field label={t("التاريخ", "Date")} required invalid={iss.has("date")}><input type="date" value={form.bill_date} onChange={(e) => setForm({ ...form, bill_date: e.target.value })} /></Field>
         <Field label={t("الاستحقاق", "Due date")}><input type="date" value={form.due_date || ""} onChange={(e) => setForm({ ...form, due_date: e.target.value })} /></Field>
-        <Field label={t("محتجزات (مقاول باطن)", "Retention (subcontractor)")}><input className="num" type="number" step="0.01" min="0" value={form.retention_amount ?? 0} onChange={(e) => setForm({ ...form, retention_amount: e.target.value })} /></Field>
+        <Field label={t("محتجزات (مقاول باطن)", "Retention (subcontractor)")} invalid={iss.has("retention")}><input className="num" type="number" step="0.01" min="0" value={form.retention_amount ?? 0} onChange={(e) => setForm({ ...form, retention_amount: e.target.value })} /></Field>
       </div></Panel>
       <Panel pad={false} title={t("البنود", "Lines")}>
         <div className="tbl-wrap"><table className="tbl edit">
           <thead><tr><th style={{ minWidth: 200 }}>{t("الوصف", "Description")}</th><th style={{ minWidth: 220 }}>{t("حساب المصروف/التكلفة", "Expense/cost account")}</th><th style={{ minWidth: 160 }}>{t("المشروع", "Project")}</th>
             <th className="n">{t("الكمية", "Qty")}</th><th className="n">{t("السعر", "Price")}</th><th style={{ minWidth: 140 }}>{t("الضريبة", "Tax")}</th><th className="n">{t("الصافي", "Net")}</th><th /></tr></thead>
           <tbody>{lines.map((l, k) => (
-            <tr key={k}>
+            <tr key={k} className={iss.has(`line${k}`) ? "invalid" : ""}>
               <td><input value={l.description} onChange={(e) => setLine(k, { description: e.target.value })} /></td>
               <td><select value={l.account_id || ""} onChange={(e) => setLine(k, { account_id: e.target.value || null })}><option value="">—</option>{lk.data.accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></td>
               <td><select value={l.project_id || ""} onChange={(e) => setLine(k, { project_id: e.target.value || null })}><option value="">{t("(المشروع العام)", "(bill project)")}</option>{lk.data.projects.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></td>
@@ -188,6 +208,7 @@ export function BillEditor({ params }) {
 export function Payments() {
   const { t, can } = useApp();
   const [act, busy] = useAction();
+  const iss = useIssues();
   const q = new URLSearchParams(window.location.hash.split("?")[1] || "");
   const [edit, setEdit] = useState(null);
   const list = useData(() => run(supabase.from("payments").select("*, accounts!payments_account_id_fkey(name_ar), customers(name_ar), vendors(name_ar), invoices(number), bills(number)")
@@ -236,6 +257,15 @@ export function Payments() {
   ] : [];
 
   async function save(post) {
+    const out = validateRecord(fields, e, t);
+    if (!(Number(e.amount) > 0)) out.push({ key: "amount", msg: t("المبلغ يجب أن يكون أكبر من صفر", "The amount must be above zero") });
+    const inv = e.purpose === "invoice" && lk.data.invoices.find((x) => x.id === e.invoice_id);
+    if (inv && Number(e.amount) > Number(inv.net_payable) - Number(inv.amount_paid) + 0.001)
+      out.push({ key: "amount", msg: t(`المبلغ أكبر من المتبقي على الفاتورة (${num(Number(inv.net_payable) - Number(inv.amount_paid))})`, "Amount exceeds the invoice balance") });
+    const bl = e.purpose === "bill" && lk.data.bills.find((x) => x.id === e.bill_id);
+    if (bl && Number(e.amount) > Number(bl.net_payable) - Number(bl.amount_paid) + 0.001)
+      out.push({ key: "amount", msg: t(`المبلغ أكبر من المتبقي على فاتورة المورد (${num(Number(bl.net_payable) - Number(bl.amount_paid))})`, "Amount exceeds the bill balance") });
+    if (!iss.check(out)) return;
     const rec = {};
     for (const f of fields) rec[f.key] = e[f.key] ?? null;
     for (const k of ["invoice_id", "bill_id", "customer_id", "vendor_id", "counter_account_id"]) if (!fields.find((f) => f.key === k)) rec[k] = null;
@@ -271,15 +301,16 @@ export function Payments() {
         ]} />
       </Panel>
       {edit && lk.data && (
-        <Modal wide title={e.direction === "receipt" ? t("سند قبض", "Receipt voucher") : t("سند صرف", "Payment voucher")} onClose={() => setEdit(null)}
+        <Modal wide title={e.direction === "receipt" ? t("سند قبض", "Receipt voucher") : t("سند صرف", "Payment voucher")} onClose={() => { setEdit(null); iss.clear(); }}
           footer={<>
             {e.id && <button className="btn danger" disabled={busy} onClick={async () => { if (await act(async () => { await run(supabase.from("payments").delete().eq("id", e.id)); return true; })) { setEdit(null); list.reload(); } }}>{t("حذف", "Delete")}</button>}
             <span style={{ flex: 1 }} />
             <button className="btn" onClick={() => setEdit(null)}>{t("إلغاء", "Cancel")}</button>
             <button className="btn" onClick={() => save(false)} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>
-            {can("finance.approve") && <button className="btn primary" onClick={() => save(true)} disabled={busy || !(Number(e.amount) > 0)}>{t("ترحيل", "Post")}</button>}
+            {can("finance.approve") && <button className="btn primary" onClick={() => save(true)} disabled={busy}>{t("ترحيل", "Post")}</button>}
           </>}>
-          <RecordForm fields={fields} value={e} onChange={(v) => {
+          <Issues issues={iss.issues} />
+          <RecordForm fields={fields} value={e} invalid={iss.has} onChange={(v) => {
             if (v.direction !== e.direction) v.purpose = purposes[v.direction][0][0];
             if (v.invoice_id && v.invoice_id !== e.invoice_id) { const i = lk.data.invoices.find((x) => x.id === v.invoice_id); v.amount = Number(i.net_payable) - Number(i.amount_paid); v.project_id = i.project_id; }
             if (v.bill_id && v.bill_id !== e.bill_id) { const b = lk.data.bills.find((x) => x.id === v.bill_id); v.amount = Number(b.net_payable) - Number(b.amount_paid); v.project_id = b.project_id; }

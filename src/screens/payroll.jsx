@@ -1,14 +1,19 @@
 import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
-import { useApp, useData, useAction, PageHead, Panel, Table, Money, StatusBadge, go, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, go, Loading } from "../ui.jsx";
 import { today, downloadCsv, num } from "../lib/format.js";
 
 export function PayrollRuns() {
   const { t, can } = useApp();
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [period, setPeriod] = useState(today().slice(0, 7));
   const list = useData(() => run(supabase.from("payroll_runs").select("*").order("period", { ascending: false })), []);
   async function generate() {
+    const out = [];
+    if (!/^\d{4}-\d{2}$/.test(period || "")) out.push(t("اختر شهر المسيّر", "Choose the payroll month"));
+    else if ((list.data || []).some((r) => r.period === period)) out.push(t(`يوجد مسيّر لشهر ${period} مسبقاً — افتحه من القائمة أدناه`, `A payroll for ${period} already exists — open it below`));
+    if (!iss.check(out)) return;
     const id = await act(() => rpc("generate_payroll", { p_period: period }), t("تم إعداد المسيّر", "Payroll prepared"));
     if (id) go(`/payroll/${id}`);
   }
@@ -17,8 +22,9 @@ export function PayrollRuns() {
       <PageHead title={t("مسيّرات الرواتب", "Payroll runs")} sub={t("يحسب الأيام الفعلية والإجازات بدون راتب والتأمينات الاجتماعية تلقائياً", "Computes worked days, unpaid leave and GOSI automatically")}>
         {can("payroll.manage") && <>
           <input type="month" style={{ width: 170 }} value={period} onChange={(e) => setPeriod(e.target.value)} />
-          <button className="btn primary" onClick={generate} disabled={busy || !period}>{t("إعداد مسيّر الشهر", "Prepare payroll")}</button></>}
+          <button className="btn primary" onClick={generate} disabled={busy}>{t("إعداد مسيّر الشهر", "Prepare payroll")}</button></>}
       </PageHead>
+      <Issues issues={iss.issues} />
       <Panel pad={false}>
         <Table rows={list.data} loading={list.loading} onRow={(r) => go(`/payroll/${r.id}`)} columns={[
           { key: "period", label: t("الشهر", "Period"), render: (r) => <span className="mono">{r.period}</span> },
@@ -37,6 +43,7 @@ export function PayrollRuns() {
 export function PayrollRun({ params }) {
   const { t, can, org } = useApp();
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [changes, setChanges] = useState({});
   const d = useData(async () => ({
     run: await run(supabase.from("payroll_runs").select("*").eq("id", params.id).single()),
@@ -58,8 +65,13 @@ export function PayrollRun({ params }) {
     }
   }
   const reload = () => { setChanges({}); d.reload(); };
-  async function onSave() { if (await act(async () => { await saveChanges(); return true; }, t("تم الحفظ", "Saved"))) reload(); }
-  async function onApprove() { if (await act(async () => { await saveChanges(); await rpc("approve_payroll", { p_run: r.id }); return true; }, t("تم الاعتماد", "Approved"))) reload(); }
+  function problems() {
+    return lines.filter((l) => net(l) < 0).map((l) => ({ key: l.id,
+      msg: t(`${l.employees.first_name_ar} ${l.employees.last_name_ar}: صافي الراتب سالب (${num(net(l))}) — قلّل الخصومات أو السلف`,
+             `${l.employees.first_name_ar} ${l.employees.last_name_ar}: net pay is negative — reduce deductions`) }));
+  }
+  async function onSave() { if (!iss.check(problems())) return; if (await act(async () => { await saveChanges(); return true; }, t("تم الحفظ", "Saved"))) reload(); }
+  async function onApprove() { if (!iss.check(problems())) return; if (await act(async () => { await saveChanges(); await rpc("approve_payroll", { p_run: r.id }); return true; }, t("تم الاعتماد", "Approved"))) reload(); }
   async function onPost() {
     if (!window.confirm(t("ترحيل المسيّر للمحاسبة؟", "Post payroll to the ledger?"))) return;
     if (await act(async () => { await rpc("post_payroll", { p_run: r.id }); return true; }, t("تم ترحيل الرواتب", "Payroll posted"))) reload();
@@ -94,6 +106,7 @@ export function PayrollRun({ params }) {
         {r.journal_entry_id && <a className="btn" href={`#/accounting/journals/${r.journal_entry_id}`}>{t("القيد", "Journal")}</a>}
         {r.status === "posted" && can("finance.manage") && <a className="btn" href="#/finance/payments">{t("سند صرف الرواتب", "Salary payment voucher")}</a>}
       </PageHead>
+      <Issues issues={iss.issues} />
       <div className="grid k4" style={{ marginBottom: 16 }}>
         <div className="panel kpi"><div className="l">{t("عدد الموظفين", "Employees")}</div><div className="v">{r.employees_count}</div></div>
         <div className="panel kpi"><div className="l">{t("إجمالي الرواتب", "Gross")}</div><div className="v"><Money v={r.total_gross} /></div></div>
@@ -107,7 +120,7 @@ export function PayrollRun({ params }) {
             <th className="n">{t("تأمينات الموظف", "GOSI emp.")}</th><th className="n">{t("سلف", "Advances")}</th><th className="n">{t("خصومات", "Deductions")}</th>
             <th className="n">{t("الصافي", "Net")}</th><th className="n">{t("تأمينات المنشأة", "GOSI empr.")}</th></tr></thead>
           <tbody>{lines.map((l) => (
-            <tr key={l.id}>
+            <tr key={l.id} className={iss.has(l.id) ? "invalid" : ""}>
               <td>{l.employees.code} — {l.employees.first_name_ar} {l.employees.last_name_ar}{l.projects && <div className="muted" style={{ fontSize: 12 }}>{l.projects.name_ar}</div>}</td>
               <td className="n">{Number(l.worked_days)}{Number(l.unpaid_days) > 0 && <div className="neg" style={{ fontSize: 11 }}>−{Number(l.unpaid_days)}</div>}</td>
               <td className="n"><Money v={l.basic} currency={null} /></td><td className="n"><Money v={l.housing} currency={null} /></td>

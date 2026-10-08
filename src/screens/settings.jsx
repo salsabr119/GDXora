@@ -1,14 +1,15 @@
 import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
-import { RecordForm } from "../crud.jsx";
-import { useApp, useData, useAction, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading } from "../ui.jsx";
-import { isVatNumber, isSaIban } from "../lib/format.js";
+import { RecordForm, validateRecord } from "../crud.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading } from "../ui.jsx";
+import { isVatNumber, isSaIban, today } from "../lib/format.js";
 import { imageFileToDataUrl } from "../lib/pdf.js";
 
 /* ── company ─────────────────────────────────────────────────────────── */
 export function Company() {
   const { t, org, refreshOrg } = useApp();
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [f, setF] = useState({ ...org });
   const zs = useData(() => run(supabase.from("zatca_state").select("*").maybeSingle()), []);
   const fields = [
@@ -39,6 +40,12 @@ export function Company() {
   }
   async function save(e) {
     e.preventDefault();
+    const out = validateRecord(fields, f, t);
+    if (f.vat_number && !isVatNumber(f.vat_number)) out.push({ key: "vat_number", msg: t("الرقم الضريبي غير صحيح — 15 رقماً يبدأ وينتهي بـ 3", "Invalid VAT number — 15 digits starting and ending with 3") });
+    if (f.iban && !isSaIban(f.iban)) out.push({ key: "iban", msg: t("الآيبان غير صحيح — SA متبوعاً بـ 22 رقماً", "Invalid IBAN — SA followed by 22 digits") });
+    if (f.postal_code && !/^\d{5}$/.test(f.postal_code)) out.push({ key: "postal_code", msg: t("الرمز البريدي 5 أرقام", "Postal code is 5 digits") });
+    if (f.building_no && !/^\d{4}$/.test(f.building_no)) out.push({ key: "building_no", msg: t("رقم المبنى في العنوان الوطني 4 أرقام", "National-address building number is 4 digits") });
+    if (!iss.check(out)) return;
     const rec = { logo_data: f.logo_data ?? null }; for (const x of fields) if (x.key) rec[x.key] = f[x.key] ?? null;
     if (await act(async () => { await run(supabase.from("organizations").update(rec).eq("id", org.id)); return true; }, t("تم الحفظ", "Saved"))) refreshOrg();
   }
@@ -57,7 +64,8 @@ export function Company() {
           </div>
         </div>
       </Panel>
-      <Panel><form id="org" onSubmit={save}><RecordForm fields={fields} value={f} onChange={setF} /></form></Panel>
+      <Issues issues={iss.issues} />
+      <Panel><form id="org" onSubmit={save} noValidate><RecordForm fields={fields} value={f} onChange={setF} invalid={iss.has} /></form></Panel>
       <Panel title={t("الفوترة الإلكترونية (ZATCA)", "E-invoicing (ZATCA)")}>
         <div className="grid" style={{ gap: 6 }}>
           <div>{t("البيئة", "Environment")}: <Badge kind="info">{zs.data?.environment || "sandbox"}</Badge></div>
@@ -76,6 +84,7 @@ export function Users() {
   const { t, lang } = useApp();
   const [tab, setTab] = useState("members");
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [add, setAdd] = useState(null);
   const [role, setRole] = useState("accountant");
   const d = useData(async () => ({
@@ -88,6 +97,10 @@ export function Users() {
   const { members, roles, perms, rp } = d.data;
   const roleOpts = roles.map((r) => ({ id: r.key, label: lang === "en" ? r.name_en : r.name_ar }));
   const has = new Set(rp.filter((x) => x.role_key === role).map((x) => x.perm_key));
+  const memFields = [
+            { key: "email", label: t("البريد الإلكتروني", "E-mail"), type: "email", required: true, ltr: true },
+            { key: "full_name", label: t("الاسم", "Name") },
+            { key: "role_key", label: t("الدور", "Role"), type: "select", required: true, options: roleOpts }];
 
   async function toggle(perm) {
     await act(async () => {
@@ -101,6 +114,7 @@ export function Users() {
   }
   async function addMember(e) {
     e.preventDefault();
+    if (!iss.check(validateRecord(memFields, add, t))) return;
     if (await act(() => rpc("add_member", { p_email: add.email, p_role: add.role_key, p_full_name: add.full_name || null }), t("تمت إضافة المستخدم", "User added"))) { setAdd(null); d.reload(); }
   }
 
@@ -126,14 +140,12 @@ export function Users() {
           <tr key={p.key}><td style={{ width: 40 }}><input type="checkbox" checked={has.has(p.key)} disabled={busy} onChange={() => toggle(p.key)} /></td>
             <td>{lang === "en" ? p.name_en : p.name_ar}</td><td className="muted mono">{p.key}</td></tr>))}</tbody></table>
       </Panel>}
-      {add && <Modal title={t("إضافة مستخدم", "Add user")} onClose={() => setAdd(null)}
+      {add && <Modal title={t("إضافة مستخدم", "Add user")} onClose={() => { setAdd(null); iss.clear(); }}
         footer={<><button className="btn" onClick={() => setAdd(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="mem" disabled={busy}>{t("إضافة", "Add")}</button></>}>
-        <form id="mem" onSubmit={addMember}>
+        <form id="mem" onSubmit={addMember} noValidate>
           <div className="alert">{t("يجب أن يكون لدى المستخدم حساب في GDXora (يسجّل من صفحة الدخول) ثم تضيفه هنا ببريده.", "The user signs up on the login page first, then you add them here by e-mail.")}</div>
-          <RecordForm value={add} onChange={setAdd} fields={[
-            { key: "email", label: t("البريد الإلكتروني", "E-mail"), type: "email", required: true, ltr: true },
-            { key: "full_name", label: t("الاسم", "Name") },
-            { key: "role_key", label: t("الدور", "Role"), type: "select", required: true, options: roleOpts }]} />
+          <Issues issues={iss.issues} />
+          <RecordForm value={add} onChange={setAdd} fields={memFields} invalid={iss.has} />
         </form>
       </Modal>}
     </>
@@ -149,6 +161,7 @@ export function Integrations() {
   const { t } = useApp();
   const [tab, setTab] = useState("keys");
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [newKey, setNewKey] = useState(null);
   const [plain, setPlain] = useState(null);
   const [hook, setHook] = useState(null);
@@ -158,11 +171,20 @@ export function Integrations() {
 
   async function createKey(e) {
     e.preventDefault();
+    const out = [];
+    if (!String(newKey.name || "").trim()) out.push({ key: "name", msg: t("أدخل اسماً للمفتاح (مثال: Power BI)", "Enter a name for the key") });
+    if (!newKey.scopes.length) out.push({ key: "scopes", msg: t("اختر صلاحية واحدة على الأقل", "Choose at least one scope") });
+    if (newKey.expires_at && newKey.expires_at <= today()) out.push({ key: "expires", msg: t("تاريخ الانتهاء يجب أن يكون في المستقبل", "Expiry must be in the future") });
+    if (!iss.check(out)) return;
     const k = await act(() => rpc("create_api_key", { p_name: newKey.name, p_scopes: newKey.scopes, p_expires_at: newKey.expires_at || null }));
     if (k) { setNewKey(null); setPlain(k); keys.reload(); }
   }
   async function saveHook(e) {
     e.preventDefault();
+    const out = [];
+    if (!/^https:\/\/[^\s/]+\.[^\s]+$/.test(hook.url || "")) out.push({ key: "url", msg: t("أدخل رابطاً صحيحاً يبدأ بـ https://", "Enter a valid https:// URL") });
+    if (!hook.events.length) out.push({ key: "events", msg: t("اختر حدثاً واحداً على الأقل", "Choose at least one event") });
+    if (!iss.check(out)) return;
     const rec = { url: hook.url, events: hook.events, description: hook.description || null, active: hook.active ?? true };
     const ok = await act(async () => {
       if (hook.id) await run(supabase.from("webhooks").update(rec).eq("id", hook.id)); else await run(supabase.from("webhooks").insert(rec));
@@ -218,12 +240,13 @@ Webhook headers:
         </div>
       </Panel>}
 
-      {newKey && <Modal title={t("مفتاح API جديد", "New API key")} onClose={() => setNewKey(null)}
-        footer={<><button className="btn" onClick={() => setNewKey(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="key" disabled={busy || !newKey.scopes.length}>{t("إنشاء", "Create")}</button></>}>
-        <form id="key" onSubmit={createKey} className="grid" style={{ gap: 12 }}>
-          <Field label={t("الاسم (مثال: Power BI)", "Name (e.g. Power BI)")} required><input required value={newKey.name} onChange={(e) => setNewKey({ ...newKey, name: e.target.value })} /></Field>
-          <Field label={t("الصلاحيات", "Scopes")}><Check list={SCOPES} value={newKey.scopes} onChange={(v) => setNewKey({ ...newKey, scopes: v })} /></Field>
-          <Field label={t("تاريخ الانتهاء (اختياري)", "Expires (optional)")}><input type="date" value={newKey.expires_at || ""} onChange={(e) => setNewKey({ ...newKey, expires_at: e.target.value })} /></Field>
+      {newKey && <Modal title={t("مفتاح API جديد", "New API key")} onClose={() => { setNewKey(null); iss.clear(); }}
+        footer={<><button className="btn" onClick={() => setNewKey(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="key" disabled={busy}>{t("إنشاء", "Create")}</button></>}>
+        <form id="key" onSubmit={createKey} className="grid" style={{ gap: 12 }} noValidate>
+          <Issues issues={iss.issues} />
+          <Field label={t("الاسم (مثال: Power BI)", "Name (e.g. Power BI)")} required invalid={iss.has("name")}><input value={newKey.name} onChange={(e) => setNewKey({ ...newKey, name: e.target.value })} /></Field>
+          <Field label={t("الصلاحيات", "Scopes")} required invalid={iss.has("scopes")}><Check list={SCOPES} value={newKey.scopes} onChange={(v) => setNewKey({ ...newKey, scopes: v })} /></Field>
+          <Field label={t("تاريخ الانتهاء (اختياري)", "Expires (optional)")} invalid={iss.has("expires")}><input type="date" value={newKey.expires_at || ""} onChange={(e) => setNewKey({ ...newKey, expires_at: e.target.value })} /></Field>
         </form>
       </Modal>}
       {plain && <Modal title={t("انسخ المفتاح الآن", "Copy your key now")} onClose={() => setPlain(null)}
@@ -231,14 +254,15 @@ Webhook headers:
         <div className="alert warn">{t("لن يظهر هذا المفتاح مرة أخرى. احفظه في مكان آمن.", "This key will not be shown again. Store it securely.")}</div>
         <div className="mono" style={{ wordBreak: "break-all", background: "var(--soft)", padding: 12, borderRadius: 8 }}>{plain}</div>
       </Modal>}
-      {hook && <Modal title="Webhook" onClose={() => setHook(null)}
+      {hook && <Modal title="Webhook" onClose={() => { setHook(null); iss.clear(); }}
         footer={<>
           {hook.id && <button className="btn danger" disabled={busy} onClick={async () => { if (await act(async () => { await run(supabase.from("webhooks").delete().eq("id", hook.id)); return true; })) { setHook(null); hooks.reload(); } }}>{t("حذف", "Delete")}</button>}
           <span style={{ flex: 1 }} /><button className="btn" onClick={() => setHook(null)}>{t("إلغاء", "Cancel")}</button>
-          <button className="btn primary" form="hook" disabled={busy || !hook.events.length}>{t("حفظ", "Save")}</button></>}>
-        <form id="hook" onSubmit={saveHook} className="grid" style={{ gap: 12 }}>
-          <Field label="URL (https)" required><input dir="ltr" required pattern="https://.+" value={hook.url} onChange={(e) => setHook({ ...hook, url: e.target.value })} /></Field>
-          <Field label={t("الأحداث", "Events")}><Check list={EVENTS} value={hook.events} onChange={(v) => setHook({ ...hook, events: v })} /></Field>
+          <button className="btn primary" form="hook" disabled={busy}>{t("حفظ", "Save")}</button></>}>
+        <form id="hook" onSubmit={saveHook} className="grid" style={{ gap: 12 }} noValidate>
+          <Issues issues={iss.issues} />
+          <Field label="URL (https)" required invalid={iss.has("url")}><input dir="ltr" value={hook.url} onChange={(e) => setHook({ ...hook, url: e.target.value })} /></Field>
+          <Field label={t("الأحداث", "Events")} required invalid={iss.has("events")}><Check list={EVENTS} value={hook.events} onChange={(v) => setHook({ ...hook, events: v })} /></Field>
           <Field label={t("وصف", "Description")}><input value={hook.description || ""} onChange={(e) => setHook({ ...hook, description: e.target.value })} /></Field>
           <label className="row"><input type="checkbox" checked={hook.active ?? true} onChange={(e) => setHook({ ...hook, active: e.target.checked })} />{t("مفعّل", "Active")}</label>
           {hook.secret && <Field label={t("مفتاح التوقيع (للتحقق من X-GDXora-Signature)", "Signing secret (verify X-GDXora-Signature)")}><div className="mono" style={{ wordBreak: "break-all" }}>{hook.secret}</div></Field>}

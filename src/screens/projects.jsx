@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
-import { Resource, RecordForm } from "../crud.jsx";
-import { useApp, useData, useAction, PageHead, Panel, Table, Money, StatusBadge, Modal, Tabs, go, Loading } from "../ui.jsx";
+import { Resource, RecordForm, validateRecord } from "../crud.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Modal, Tabs, go, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { num, today } from "../lib/format.js";
 
@@ -16,13 +16,13 @@ const projectFields = (t) => [
   { key: "manager_name", label: t("مدير المشروع", "Project manager") },
   { key: "location", label: t("الموقع", "Location") },
   { key: "start_date", label: t("تاريخ البدء", "Start"), type: "date" },
-  { key: "end_date", label: t("تاريخ الانتهاء", "End"), type: "date" },
+  { key: "end_date", label: t("تاريخ الانتهاء", "End"), type: "date", validate: (v, r) => (r.start_date && v < r.start_date ? t("تاريخ الانتهاء قبل تاريخ البدء", "End date is before the start date") : null) },
   { section: t("العقد", "Contract") },
   { key: "contract_no", label: t("رقم العقد", "Contract no."), ltr: true },
-  { key: "contract_value", label: t("قيمة العقد (بدون ضريبة)", "Contract value (excl. VAT)"), type: "money" },
-  { key: "retention_pct", label: t("نسبة محتجزات الضمان %", "Retention %"), type: "number" },
-  { key: "advance_amount", label: t("الدفعة المقدمة", "Advance payment"), type: "money" },
-  { key: "advance_recovery_pct", label: t("نسبة استرداد الدفعة من كل مستخلص %", "Advance recovery per billing %"), type: "number" },
+  { key: "contract_value", label: t("قيمة العقد (بدون ضريبة)", "Contract value (excl. VAT)"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
+  { key: "retention_pct", label: t("نسبة محتجزات الضمان %", "Retention %"), type: "number", validate: (v) => (Number(v) < 0 || Number(v) > 100 ? t("النسبة بين 0 و 100", "Percentage must be between 0 and 100") : null) },
+  { key: "advance_amount", label: t("الدفعة المقدمة", "Advance payment"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
+  { key: "advance_recovery_pct", label: t("نسبة استرداد الدفعة من كل مستخلص %", "Advance recovery per billing %"), type: "number", validate: (v) => (Number(v) < 0 || Number(v) > 100 ? t("النسبة بين 0 و 100", "Percentage must be between 0 and 100") : null) },
   { key: "notes", label: t("ملاحظات", "Notes"), type: "textarea", wide: true },
 ];
 
@@ -52,6 +52,7 @@ export function ProjectDetail({ params }) {
   const [edit, setEdit] = useState(null);
   const [boqEdit, setBoqEdit] = useState(null);
   const [act, busy] = useAction();
+  const iss = useIssues();
   const d = useData(async () => {
     const [p, sum, boq, budget, billings, invoices, bills] = await Promise.all([
       run(supabase.from("projects").select("*, customers(name_ar)").eq("id", params.id).single()),
@@ -74,11 +75,20 @@ export function ProjectDetail({ params }) {
 
   async function saveProject(e) {
     e.preventDefault();
+    if (!iss.check(validateRecord(projectFields(t), edit, t))) return;
     const rec = {}; for (const f of projectFields(t)) if (f.key) rec[f.key] = edit[f.key] ?? null;
     if (await act(async () => { await run(supabase.from("projects").update(rec).eq("id", p.id)); return true; }, t("تم الحفظ", "Saved"))) { setEdit(null); d.reload(); }
   }
+  const boqFields = [
+          { key: "item_no", label: t("رقم البند", "Item no.") }, { key: "description", label: t("الوصف", "Description"), required: true, wide: true },
+          { key: "unit", label: t("الوحدة", "Unit") }, { key: "quantity", label: t("الكمية التعاقدية", "Contract qty"), type: "number", required: true },
+          { key: "unit_price", label: t("سعر الوحدة", "Rate"), type: "money", required: true }, { key: "sort", label: t("الترتيب", "Order"), type: "number" }];
   async function saveBoq(e) {
     e.preventDefault();
+    const out = validateRecord(boqFields, boqEdit, t);
+    if (boqEdit.quantity !== null && boqEdit.quantity !== undefined && !(Number(boqEdit.quantity) > 0)) out.push({ key: "quantity", msg: t("الكمية التعاقدية يجب أن تكون أكبر من صفر", "Contract quantity must be above zero") });
+    if (Number(boqEdit.unit_price) < 0) out.push({ key: "unit_price", msg: t("السعر لا يكون سالباً", "Rate cannot be negative") });
+    if (!iss.check(out)) return;
     const rec = { project_id: p.id, item_no: boqEdit.item_no || null, description: boqEdit.description, unit: boqEdit.unit || null,
                   quantity: Number(boqEdit.quantity || 0), unit_price: Number(boqEdit.unit_price || 0), sort: Number(boqEdit.sort || 0) };
     const ok = await act(async () => {
@@ -163,20 +173,17 @@ export function ProjectDetail({ params }) {
         { key: "v", label: t("المورد", "Vendor"), render: (r) => r.vendors?.name_ar }, { key: "bill_date", label: t("التاريخ", "Date"), type: "date" },
         { key: "total", label: t("الإجمالي", "Total"), type: "money" }, { key: "status", label: t("الحالة", "Status"), render: (r) => <StatusBadge status={r.status} /> }]} /></Panel>}
 
-      {edit && <Modal wide title={t("تعديل المشروع", "Edit project")} onClose={() => setEdit(null)}
+      {edit && <Modal wide title={t("تعديل المشروع", "Edit project")} onClose={() => { setEdit(null); iss.clear(); }}
         footer={<><button className="btn" onClick={() => setEdit(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="prj" disabled={busy}>{t("حفظ", "Save")}</button></>}>
-        <form id="prj" onSubmit={saveProject}><RecordForm fields={projectFields(t)} value={edit} onChange={setEdit} lookups={lk.data} /></form>
+        <form id="prj" onSubmit={saveProject} noValidate><Issues issues={iss.issues} /><RecordForm fields={projectFields(t)} value={edit} onChange={setEdit} lookups={lk.data} invalid={iss.has} /></form>
       </Modal>}
-      {boqEdit && <Modal title={t("بند جدول الكميات", "BOQ item")} onClose={() => setBoqEdit(null)}
+      {boqEdit && <Modal title={t("بند جدول الكميات", "BOQ item")} onClose={() => { setBoqEdit(null); iss.clear(); }}
         footer={<>
           {boqEdit.id && <button className="btn danger" disabled={busy} onClick={async () => {
             if (await act(async () => { await run(supabase.from("project_boq_items").delete().eq("id", boqEdit.id)); return true; })) { setBoqEdit(null); d.reload(); }
           }}>{t("حذف", "Delete")}</button>}<span style={{ flex: 1 }} />
           <button className="btn" onClick={() => setBoqEdit(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="boq" disabled={busy}>{t("حفظ", "Save")}</button></>}>
-        <form id="boq" onSubmit={saveBoq}><RecordForm value={boqEdit} onChange={setBoqEdit} fields={[
-          { key: "item_no", label: t("رقم البند", "Item no.") }, { key: "description", label: t("الوصف", "Description"), required: true, wide: true },
-          { key: "unit", label: t("الوحدة", "Unit") }, { key: "quantity", label: t("الكمية التعاقدية", "Contract qty"), type: "number", required: true },
-          { key: "unit_price", label: t("سعر الوحدة", "Rate"), type: "money", required: true }, { key: "sort", label: t("الترتيب", "Order"), type: "number" }]} /></form>
+        <form id="boq" onSubmit={saveBoq} noValidate><Issues issues={iss.issues} /><RecordForm value={boqEdit} onChange={setBoqEdit} invalid={iss.has} fields={boqFields} /></form>
       </Modal>}
     </>
   );
@@ -185,6 +192,7 @@ export function ProjectDetail({ params }) {
 export function ProgressBilling({ params }) {
   const { t, can } = useApp();
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [qty, setQty] = useState({});
   const d = useData(async () => {
     const pb = await run(supabase.from("progress_billings").select("*, projects(code, name_ar, retention_pct, advance_recovery_pct)").eq("id", params.billingId).single());
@@ -203,8 +211,20 @@ export function ProgressBilling({ params }) {
     const changed = lines.filter((l) => qty[l.id] !== undefined && Number(qty[l.id]) !== Number(l.cumulative_qty));
     for (const l of changed) await run(supabase.from("progress_billing_lines").update({ cumulative_qty: Number(qty[l.id]) }).eq("id", l.id));
   }
-  async function onSave() { if (await act(async () => { await saveQty(); return true; }, t("تم الحفظ", "Saved"))) { setQty({}); d.reload(); } }
+  function problems(invoicing) {
+    const out = [];
+    for (const l of lines) {
+      const b = l.project_boq_items, c = cum(l), name = `${b.item_no || ""} ${b.description}`.trim();
+      if (Number.isNaN(c)) out.push({ key: l.id, msg: t(`«${name}»: أدخل رقماً صحيحاً`, `"${name}": enter a valid number`) });
+      else if (c < Number(l.previous_qty)) out.push({ key: l.id, msg: t(`«${name}»: الكمية التراكمية (${c}) أقل من السابقة (${Number(l.previous_qty)})`, `"${name}": cumulative below previous`) });
+      else if (c > Number(b.quantity)) out.push({ key: l.id, msg: t(`«${name}»: الكمية التراكمية (${c}) أكبر من كمية العقد (${Number(b.quantity)})`, `"${name}": cumulative exceeds contract quantity`) });
+    }
+    if (invoicing && !out.length && current <= 0) out.push(t("لا توجد أعمال جديدة في هذا المستخلص — ارفع الكمية التراكمية لبند واحد على الأقل", "No new work in this billing — raise the cumulative quantity of at least one item"));
+    return out;
+  }
+  async function onSave() { if (!iss.check(problems(false))) return; if (await act(async () => { await saveQty(); return true; }, t("تم الحفظ", "Saved"))) { setQty({}); d.reload(); } }
   async function onInvoice() {
+    if (!iss.check(problems(true))) return;
     if (!window.confirm(t("إنشاء فاتورة المستخلص؟ ستُحسب المحتجزات واسترداد الدفعة المقدمة تلقائياً.", "Create the billing invoice? Retention and advance recovery are applied automatically."))) return;
     const inv = await act(async () => { await saveQty(); return rpc("invoice_progress_billing", { p_billing: pb.id }); }, t("تم إنشاء مسودة الفاتورة", "Draft invoice created"));
     if (inv) go(`/sales/invoices/${inv}`);
@@ -220,9 +240,10 @@ export function ProgressBilling({ params }) {
         <button className="btn" onClick={() => go(`/projects/${params.id}`)}>{t("رجوع", "Back")}</button>
         {draft && <button className="btn danger" onClick={onDelete} disabled={busy}>{t("حذف", "Delete")}</button>}
         {draft && <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ الكميات", "Save quantities")}</button>}
-        {draft && <button className="btn primary" onClick={onInvoice} disabled={busy || current <= 0}>{t("إنشاء الفاتورة", "Create invoice")}</button>}
+        {draft && <button className="btn primary" onClick={onInvoice} disabled={busy}>{t("إنشاء الفاتورة", "Create invoice")}</button>}
         {pb.invoice_id && <a className="btn primary" href={`#/sales/invoices/${pb.invoice_id}`}>{t("عرض الفاتورة", "View invoice")}</a>}
       </PageHead>
+      <Issues issues={iss.issues} />
       <Panel pad={false}>
         <div className="tbl-wrap"><table className="tbl edit">
           <thead><tr><th>{t("البند", "Item")}</th><th>{t("الوصف", "Description")}</th><th>{t("الوحدة", "Unit")}</th><th className="n">{t("كمية العقد", "Contract")}</th>
@@ -231,7 +252,7 @@ export function ProgressBilling({ params }) {
           <tbody>{lines.map((l) => {
             const b = l.project_boq_items; const c = cum(l); const cur = c - Number(l.previous_qty);
             const over = c > Number(b.quantity); const under = c < Number(l.previous_qty);
-            return <tr key={l.id}>
+            return <tr key={l.id} className={iss.has(l.id) ? "invalid" : ""}>
               <td>{b.item_no}</td><td>{b.description}</td><td>{b.unit}</td><td className="n">{Number(b.quantity)}</td><td className="n">{Number(l.previous_qty)}</td>
               <td className="n">{draft ? <input className="num" type="number" step="any" style={{ width: 110, borderColor: over || under ? "var(--bad)" : undefined }}
                 value={qty[l.id] ?? l.cumulative_qty} onChange={(e) => setQty({ ...qty, [l.id]: e.target.value })} /> : Number(l.cumulative_qty)}</td>

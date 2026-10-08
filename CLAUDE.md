@@ -9,6 +9,9 @@
   and emit events with `emit_event()`.
 - UI: screens in `src/screens/`, registered in `src/nav.js` (permission-gated). Master data uses `Resource` (`src/crud.jsx`).
   Bilingual strings inline: `t("عربي", "English")`.
+- **Validation rule (UX):** never disable a submit button to signal missing input. On submit, collect problems and show them
+  with `useIssues()` + `<Issues/>` (red box titled «الرجاء إكمال ما يلي…»), and mark fields/lines via `invalid`. Master-data
+  forms get this from `validateRecord()` (field `required` / `validate`). Server errors still surface as red toasts.
 - ZATCA library `src/lib/zatca/` is isomorphic (browser + Node); keep `tests/zatca.test.js` green (includes the official QR vector).
 - Payroll formulas exist in SQL (authoritative) and `src/lib/payroll.js` — change both and both tests.
 

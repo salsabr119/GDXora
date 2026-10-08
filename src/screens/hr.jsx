@@ -1,10 +1,10 @@
 import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
-import { Resource, RecordForm } from "../crud.jsx";
-import { useApp, useData, useAction, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Select } from "../ui.jsx";
+import { Resource, RecordForm, validateRecord } from "../crud.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Select } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { eosb, gosi } from "../lib/payroll.js";
-import { today } from "../lib/format.js";
+import { today, isSaIban } from "../lib/format.js";
 
 const REASONS = (t) => [
   { id: "employer_termination", label: t("إنهاء من صاحب العمل", "Terminated by employer") },
@@ -40,7 +40,7 @@ export function Employees() {
       { key: "last_name_ar", label: t("اسم العائلة", "Last name (AR)"), required: true },
       { key: "first_name_en", label: t("First name", "First name (EN)"), ltr: true },
       { key: "last_name_en", label: t("Last name", "Last name (EN)"), ltr: true },
-      { key: "nationality", label: t("رمز الجنسية (SA للسعودي)", "Nationality code (SA = Saudi)"), ltr: true, required: true, transform: (v) => (v || "").toUpperCase().slice(0, 2) },
+      { key: "nationality", label: t("رمز الجنسية (SA للسعودي)", "Nationality code (SA = Saudi)"), ltr: true, required: true, transform: (v) => (v || "").toUpperCase().slice(0, 2), validate: (v) => (/^[A-Z]{2}$/.test(v) ? null : t("رمز الجنسية حرفان إنجليزيان (مثال: SA، EG، IN)", "Nationality is a 2-letter code (e.g. SA, EG, IN)")) },
       { key: "national_id", label: t("رقم الهوية / الإقامة", "National ID / Iqama"), ltr: true },
       { key: "id_expiry", label: t("انتهاء الهوية/الإقامة", "ID expiry"), type: "date" },
       { key: "passport_no", label: t("رقم الجواز", "Passport"), ltr: true },
@@ -56,20 +56,20 @@ export function Employees() {
       { key: "contract_type", label: t("نوع العقد", "Contract"), type: "select", options: [{ id: "unlimited", label: t("غير محدد المدة", "Unlimited") }, { id: "limited", label: t("محدد المدة", "Fixed term") }] },
       { key: "contract_end_date", label: t("نهاية العقد", "Contract end"), type: "date" },
       { key: "status", label: t("الحالة", "Status"), type: "select", options: [{ id: "active", label: t("نشط", "Active") }, { id: "on_leave", label: t("في إجازة", "On leave") }, { id: "terminated", label: t("منتهي الخدمة", "Terminated") }] },
-      { key: "termination_date", label: t("تاريخ انتهاء الخدمة", "Termination date"), type: "date" },
+      { key: "termination_date", label: t("تاريخ انتهاء الخدمة", "Termination date"), type: "date", validate: (v, r) => (r.hire_date && v < r.hire_date ? t("تاريخ انتهاء الخدمة قبل تاريخ المباشرة", "Termination date is before the hire date") : null) },
       { key: "termination_reason", label: t("سبب انتهاء الخدمة", "Termination reason"), type: "select", options: REASONS(t) },
       { key: "annual_leave_days", label: t("أيام الإجازة السنوية", "Annual leave days"), type: "number" },
       { section: t("الراتب الشهري", "Monthly pay") },
-      { key: "basic_salary", label: t("الراتب الأساسي", "Basic salary"), type: "money", required: true },
-      { key: "housing_allowance", label: t("بدل السكن", "Housing"), type: "money" },
-      { key: "transport_allowance", label: t("بدل النقل", "Transport"), type: "money" },
-      { key: "other_allowances", label: t("بدلات أخرى", "Other allowances"), type: "money" },
+      { key: "basic_salary", label: t("الراتب الأساسي", "Basic salary"), type: "money", required: true, validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
+      { key: "housing_allowance", label: t("بدل السكن", "Housing"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
+      { key: "transport_allowance", label: t("بدل النقل", "Transport"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
+      { key: "other_allowances", label: t("بدلات أخرى", "Other allowances"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
       { section: t("التأمينات والبنك", "GOSI & bank") },
       { key: "gosi_registered", label: t("مسجل في التأمينات", "GOSI registered"), type: "checkbox" },
       { key: "gosi_scheme", label: t("نظام التأمينات", "GOSI scheme"), type: "select", options: [{ id: "legacy", label: t("مسجل قبل يوليو 2024", "Registered before Jul 2024") }, { id: "new", label: t("نظام 2024 الجديد", "2024 law (new entrant)") }] },
       { key: "gosi_number", label: t("رقم المشترك", "GOSI number"), ltr: true },
       { key: "bank_name", label: t("البنك", "Bank") },
-      { key: "iban", label: t("الآيبان (لملف حماية الأجور)", "IBAN (for WPS)"), ltr: true, transform: (v) => (v || "").replace(/\s/g, "").toUpperCase() || null },
+      { key: "iban", label: t("الآيبان (لملف حماية الأجور)", "IBAN (for WPS)"), ltr: true, transform: (v) => (v || "").replace(/\s/g, "").toUpperCase() || null, validate: (v) => (isSaIban(v) ? null : t("الآيبان غير صحيح — SA متبوعاً بـ 22 رقماً", "Invalid IBAN — SA followed by 22 digits")) },
       { key: "notes", label: t("ملاحظات", "Notes"), type: "textarea", wide: true },
     ],
   }} />;
@@ -93,6 +93,7 @@ const LEAVE_TYPES = (t) => [
 export function Leave() {
   const { t, can } = useApp();
   const [act, busy] = useAction();
+  const iss = useIssues();
   const [edit, setEdit] = useState(null);
   const [balance, setBalance] = useState(null);
   const list = useData(() => run(supabase.from("leave_requests").select("*, employees(code, first_name_ar, last_name_ar)").order("start_date", { ascending: false }).limit(500)), []);
@@ -102,8 +103,16 @@ export function Leave() {
   async function decide(r, ok) {
     if (await act(async () => { await rpc("decide_leave", { p_leave: r.id, p_approve: ok }); return true; }, ok ? t("تم الاعتماد", "Approved") : t("تم الرفض", "Rejected"))) list.reload();
   }
+  const leaveFields = [
+            { key: "employee_id", label: t("الموظف", "Employee"), type: "select", required: true, options: emps.data || [] },
+            { key: "leave_type", label: t("النوع", "Type"), type: "select", required: true, options: types },
+            { key: "start_date", label: t("من", "From"), type: "date", required: true }, { key: "end_date", label: t("إلى", "To"), type: "date", required: true },
+            { key: "notes", label: t("ملاحظات", "Notes"), wide: true }];
   async function save(e) {
     e.preventDefault();
+    const out = validateRecord(leaveFields, edit, t);
+    if (edit.start_date && edit.end_date && edit.end_date < edit.start_date) out.push({ key: "end_date", msg: t("تاريخ النهاية قبل تاريخ البداية", "End date is before the start date") });
+    if (!iss.check(out)) return;
     const rec = { employee_id: edit.employee_id, leave_type: edit.leave_type, start_date: edit.start_date, end_date: edit.end_date, notes: edit.notes || null };
     if (await act(async () => { await run(supabase.from("leave_requests").insert(rec)); return true; }, t("تم تقديم الطلب", "Request submitted"))) { setEdit(null); list.reload(); }
   }
@@ -128,14 +137,11 @@ export function Leave() {
               <button className="btn sm danger" disabled={busy} onClick={() => decide(r, false)}>{t("رفض", "Reject")}</button></span> },
         ]} />
       </Panel>
-      {edit && <Modal title={t("طلب إجازة", "Leave request")} onClose={() => setEdit(null)}
+      {edit && <Modal title={t("طلب إجازة", "Leave request")} onClose={() => { setEdit(null); iss.clear(); }}
         footer={<><button className="btn" onClick={() => setEdit(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="lv" disabled={busy}>{t("تقديم", "Submit")}</button></>}>
-        <form id="lv" onSubmit={save}>
-          <RecordForm value={edit} onChange={onEmp} fields={[
-            { key: "employee_id", label: t("الموظف", "Employee"), type: "select", required: true, options: emps.data || [] },
-            { key: "leave_type", label: t("النوع", "Type"), type: "select", required: true, options: types },
-            { key: "start_date", label: t("من", "From"), type: "date", required: true }, { key: "end_date", label: t("إلى", "To"), type: "date", required: true },
-            { key: "notes", label: t("ملاحظات", "Notes"), wide: true }]} />
+        <form id="lv" onSubmit={save} noValidate>
+          <Issues issues={iss.issues} />
+          <RecordForm value={edit} onChange={onEmp} fields={leaveFields} invalid={iss.has} />
           {balance && <div className="alert" style={{ marginTop: 12 }}>{t("رصيد الإجازة السنوية", "Annual leave balance")}: <b>{balance.balance}</b> {t("يوم", "days")} ({t("مستحق", "accrued")} {balance.accrued} · {t("مستخدم", "taken")} {balance.taken})</div>}
         </form>
       </Modal>}

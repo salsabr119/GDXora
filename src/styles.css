@@ -230,3 +230,12 @@ table.tbl { width: 100%; border-collapse: collapse; }
   .a4 { box-shadow: none; border-radius: 0; min-height: 297mm; }
   .page-head, .no-print { display: none !important; }
 }
+
+/* ── validation ── */
+.alert.issues { border: 1px solid #f4c7c3; }
+.alert.issues ul { margin: 6px 0 0; padding-inline-start: 20px; }
+.alert.issues li { margin: 2px 0; }
+.field.invalid label { color: var(--bad); }
+.field.invalid input, .field.invalid select, .field.invalid textarea,
+tr.invalid input, tr.invalid select, input.invalid, select.invalid { border-color: var(--bad) !important; background: #fff6f5; }
+.field .err { color: var(--bad); font-size: 11px; }

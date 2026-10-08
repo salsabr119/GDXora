@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
-import { useApp, useData, useAction, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, go, useName, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, go, useName, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { today, downloadCsv, num } from "../lib/format.js";
 
@@ -87,6 +87,7 @@ export function JournalEditor({ params }) {
   const { t, can } = useApp();
   const isNew = params.id === "new";
   const [act, busy] = useAction();
+  const v = useIssues();
   const lk = useData(async () => ({ accounts: await L.accounts(), projects: await L.projects() }), []);
   const [form, setForm] = useState(isNew ? { entry_date: today(), memo: "", lines: [blankLine(), blankLine()] } : null);
   const entry = useData(async () => {
@@ -108,7 +109,31 @@ export function JournalEditor({ params }) {
   const payload = () => lines.filter((l) => l.account_id && (Number(l.debit) || Number(l.credit)))
     .map((l) => ({ account_id: l.account_id, description: l.description || null, debit: Number(l.debit || 0), credit: Number(l.credit || 0), project_id: l.project_id || null }));
 
+  // what is missing before saving / posting — shown in red above the form
+  function problems(post) {
+    const out = [];
+    if (!form.entry_date) out.push({ key: "entry_date", msg: t("أدخل تاريخ القيد", "Enter the entry date") });
+    if (post && !String(form.memo || "").trim()) out.push({ key: "memo", msg: t("أدخل بيان القيد (وصف مختصر للعملية)", "Enter a memo describing the entry") });
+    lines.forEach((l, i) => {
+      const d = Number(l.debit || 0), c = Number(l.credit || 0);
+      const n = i + 1;
+      if (d < 0 || c < 0) out.push({ key: `line${i}`, msg: t(`السطر ${n}: المبالغ لا تكون سالبة`, `Line ${n}: amounts cannot be negative`) });
+      if (d > 0 && c > 0) out.push({ key: `line${i}`, msg: t(`السطر ${n}: اكتب المبلغ في المدين أو الدائن، وليس الاثنين`, `Line ${n}: use either debit or credit, not both`) });
+      if ((d || c) && !l.account_id) out.push({ key: `line${i}`, msg: t(`السطر ${n}: اختر الحساب`, `Line ${n}: choose an account`) });
+      if (l.account_id && !d && !c) out.push({ key: `line${i}`, msg: t(`السطر ${n}: أدخل مبلغاً في المدين أو الدائن`, `Line ${n}: enter a debit or credit amount`) });
+    });
+    const valid = lines.filter((l) => l.account_id && (Number(l.debit) || Number(l.credit)));
+    if (valid.length < 2) out.push(t("القيد يحتاج سطرين مكتملين على الأقل (حساب + مبلغ)", "An entry needs at least two complete lines (account + amount)"));
+    if (post) {
+      if (dr + cr <= 0) out.push(t("أدخل مبالغ القيد في المدين والدائن", "Enter the debit and credit amounts"));
+      else if (!balanced) out.push(t(`القيد غير متوازن: المدين ${num(dr)} والدائن ${num(cr)} — الفرق ${num(Math.abs(dr - cr))}`,
+                                    `Not balanced: debit ${num(dr)} vs credit ${num(cr)} — difference ${num(Math.abs(dr - cr))}`));
+    }
+    return out;
+  }
+
   async function save(post) {
+    if (!v.check(problems(post))) return;
     const id = await act(async () => {
       if (isNew) return rpc("create_journal", { p_date: form.entry_date, p_memo: form.memo, p_lines: payload(), p_post: post });
       await rpc("update_journal_draft", { p_entry: params.id, p_date: form.entry_date, p_memo: form.memo, p_lines: payload(), p_post: post });
@@ -138,18 +163,19 @@ export function JournalEditor({ params }) {
         <button className="btn" onClick={() => go("/accounting/journals")}>{t("رجوع", "Back")}</button>
         {!isNew && e.status === "draft" && can("accounting.manage") && <button className="btn danger" onClick={removeDraft} disabled={busy}>{t("حذف", "Delete")}</button>}
         {editable && can("accounting.manage") && <button className="btn" onClick={() => save(false)} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>}
-        {editable && can("accounting.post") && <button className="btn primary" onClick={() => save(true)} disabled={busy || !balanced}>{t("ترحيل", "Post")}</button>}
+        {editable && can("accounting.post") && <button className="btn primary" onClick={() => save(true)} disabled={busy}>{t("ترحيل", "Post")}</button>}
         {e?.status === "posted" && e.source_type === "manual" && can("accounting.post") && <button className="btn" onClick={reverse} disabled={busy}>{t("عكس القيد", "Reverse")}</button>}
         {e?.reversal_of && <a className="btn" href={`#/accounting/journals/${e.reversal_of}`}>{t("القيد الأصلي", "Original entry")}</a>}
         {e?.reversed_by && <a className="btn" href={`#/accounting/journals/${e.reversed_by}`}>{t("القيد العكسي", "Reversing entry")}</a>}
       </PageHead>
 
+      <Issues issues={v.issues} />
       <Panel>
         <div className="form">
-          <Field label={t("التاريخ", "Date")} required>
+          <Field label={t("التاريخ", "Date")} required invalid={v.has("entry_date")}>
             {editable ? <input type="date" value={form.entry_date} onChange={(x) => setForm({ ...form, entry_date: x.target.value })} /> : <DateText v={e.entry_date} />}
           </Field>
-          <Field label={t("البيان", "Memo")} wide>
+          <Field label={t("البيان", "Memo")} wide required invalid={v.has("memo")}>
             {editable ? <input value={form.memo} onChange={(x) => setForm({ ...form, memo: x.target.value })} /> : <span>{e.memo}</span>}
           </Field>
         </div>
@@ -162,7 +188,7 @@ export function JournalEditor({ params }) {
               <th className="n">{t("مدين", "Debit")}</th><th className="n">{t("دائن", "Credit")}</th>{editable && <th />}</tr></thead>
             <tbody>
               {editable ? lines.map((l, i) => (
-                <tr key={i}>
+                <tr key={i} className={v.has(`line${i}`) ? "invalid" : ""}>
                   <td><select value={l.account_id || ""} onChange={(x) => setLine(i, { account_id: x.target.value || null })}>
                     <option value="">—</option>{accOpts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}</select></td>
                   <td><input value={l.description || ""} onChange={(x) => setLine(i, { description: x.target.value })} /></td>
