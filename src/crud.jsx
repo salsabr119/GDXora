@@ -31,6 +31,7 @@ export function RecordForm({ fields, value, onChange, lookups, invalid }) {
     <div className="form">
       {fields.map((f) => {
         if (f.section) return <div key={`s-${f.section}`} className="section-title">{f.section}</div>;
+        if (f.formHidden) return null;   // import-only column
         const v = value[f.key];
         const set = (x) => onChange({ ...value, [f.key]: f.transform ? f.transform(x) : x });
         let input;
@@ -104,7 +105,7 @@ export function Resource({ cfg }) {
     if (!v.check([...validateRecord(cfg.fields, edit, t), ...(cfg.validate ? cfg.validate(edit, t) : [])])) return;
     const record = {};
     for (const f of cfg.fields) {
-      if (!f.key || f.readOnly) continue;
+      if (!f.key || f.readOnly || f.formHidden) continue;
       const v = edit[f.key] ?? null;
       // new records: leave empty fields out so the database default applies
       if (v === null && !edit.id) continue;

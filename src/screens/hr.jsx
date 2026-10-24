@@ -37,6 +37,10 @@ const EMPLOYEE_FIELDS = (t) => [
       { section: t("الوظيفة", "Employment") },
       { key: "job_title", label: t("المسمى الوظيفي", "Job title") },
       { key: "department_id", label: t("القسم", "Department"), type: "select", options: (lk) => lk.departments || [] },
+      { key: "manager_id", label: t("المدير المباشر", "Direct manager"), type: "select", import: false,
+        options: (lk, r) => (lk.employees || []).filter((e) => e.id !== r?.id) },
+      { key: "manager_ref", label: t("المدير المباشر (الرقم أو الاسم الكامل)", "Direct manager (number or full name)"), formHidden: true,
+        hint: t("رقم الموظف أو اسمه الأول والعائلة كما هو مسجّل — يمكن أن يكون في نفس الملف", "Employee number or first + last name — may be in the same file") },
       { key: "project_id", label: t("المشروع (توزيع تكلفة الراتب)", "Project (salary cost)"), type: "select", options: (lk) => lk.projects || [] },
       { key: "hire_date", label: t("تاريخ المباشرة", "Hire date"), type: "date", required: true },
       { key: "contract_type", label: t("نوع العقد", "Contract"), type: "select", options: [{ id: "unlimited", label: t("غير محدد المدة", "Unlimited") }, { id: "limited", label: t("محدد المدة", "Fixed term") }] },
@@ -69,7 +73,7 @@ export function Employees() {
     toForm: (r) => { const { employee_pay: _p, departments: _d, ...rest } = r; return { ...rest, ...(payOf(r) ? Object.fromEntries(PAY_KEYS.map((k) => [k, payOf(r)[k]])) : {}) }; },
     saveRecords: (rows) => rpc("save_employees", { p_rows: rows }),
     managePerm: "hr.manage", search: ["code", "first_name_ar", "last_name_ar", "national_id", "job_title", "phone"],
-    loadLookups: async () => ({ departments: await L.departments(), projects: await L.projects() }),
+    loadLookups: async () => ({ departments: await L.departments(), projects: await L.projects(), employees: await L.employees() }),
     defaults: { nationality: "SA", contract_type: "unlimited", status: "active", hire_date: today(), gosi_registered: true, gosi_scheme: "legacy",
                 annual_leave_days: 21, ...(salaries ? { basic_salary: 0, housing_allowance: 0, transport_allowance: 0, other_allowances: 0 } : {}) },
     columns: [
@@ -77,6 +81,7 @@ export function Employees() {
       { key: "name", label: t("الاسم", "Name"), render: (r) => `${r.first_name_ar} ${r.last_name_ar}` },
       { key: "job_title", label: t("المسمى", "Title") },
       { key: "d", label: t("القسم", "Department"), render: (r) => r.departments?.name_ar || "—" },
+      { key: "m", label: t("المدير المباشر", "Manager"), render: (r, lk) => { const m = lk?.employees?.find((e) => e.id === r.manager_id); return m ? `${m.first_name_ar} ${m.last_name_ar}` : "—"; } },
       { key: "p", label: t("المشروع", "Project"), render: (r, lk) => lk?.projects?.find((p) => p.id === r.project_id)?.name_ar || "—" },
       { key: "nationality", label: t("الجنسية", "Nationality"), render: (r) => r.is_saudi ? t("سعودي", "Saudi") : r.nationality },
       ...(salaries ? [{ key: "total", label: t("إجمالي الراتب", "Total pay"), n: true, render: (r) => (payOf(r) ? <Money v={totalPay(payOf(r))} currency={null} /> : "—") }] : []),
@@ -88,10 +93,17 @@ export function Employees() {
 
 export function Departments() {
   const { t } = useApp();
+  const empName = (lk, id) => { const e = lk?.employees?.find((x) => x.id === id); return e ? `${e.first_name_ar} ${e.last_name_ar}` : "—"; };
   return <Resource cfg={{
     table: "departments", title: t("الأقسام", "Departments"), order: "name_ar.asc", managePerm: "hr.manage", canDelete: true,
-    columns: [{ key: "name_ar", label: t("القسم", "Department") }, { key: "name_en", label: "English" }],
-    fields: [{ key: "name_ar", label: t("الاسم (عربي)", "Name (Arabic)"), required: true }, { key: "name_en", label: t("الاسم (إنجليزي)", "Name (English)"), ltr: true }],
+    sub: t("القسم يمكن أن يكون تحت قسم آخر، وله رئيس من الموظفين", "A department can sit under another and has a head"),
+    loadLookups: async () => ({ departments: await L.departments(), employees: await L.employees() }),
+    columns: [{ key: "name_ar", label: t("القسم", "Department") }, { key: "name_en", label: "English" },
+      { key: "parent", label: t("يتبع", "Under"), render: (r, lk) => lk?.departments?.find((d) => d.id === r.parent_id)?.name_ar || "—" },
+      { key: "head", label: t("رئيس القسم", "Head"), render: (r, lk) => empName(lk, r.head_employee_id) }],
+    fields: [{ key: "name_ar", label: t("الاسم (عربي)", "Name (Arabic)"), required: true }, { key: "name_en", label: t("الاسم (إنجليزي)", "Name (English)"), ltr: true },
+      { key: "parent_id", label: t("يتبع قسم", "Under department"), type: "select", options: (lk, r) => (lk.departments || []).filter((d) => d.id !== r?.id) },
+      { key: "head_employee_id", label: t("رئيس القسم", "Head of department"), type: "select", options: (lk) => lk.employees || [] }],
   }} />;
 }
 
