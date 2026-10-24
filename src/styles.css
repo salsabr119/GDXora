@@ -259,3 +259,31 @@ tr.invalid td { background: #fff6f5; }
   .report-print-head h2 { margin: 4px 0; }
   .kpi { break-inside: avoid; }
 }
+
+/* ── organisation chart (top-down tree; laid out LTR so the connector lines work, text stays RTL) ── */
+.org { overflow: auto; padding: 20px 12px; direction: ltr; }
+.org ul { display: flex; justify-content: center; position: relative; margin: 0; padding: 20px 0 0; }
+.org > ul { padding-top: 0; }
+.org li { list-style: none; text-align: center; position: relative; padding: 20px 5px 0; }
+.org li::before, .org li::after { content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 20px; border-top: 2px solid #c9d1db; }
+.org li::after { right: auto; left: 50%; border-left: 2px solid #c9d1db; }
+.org li:only-child::before, .org li:only-child::after { display: none; }
+.org li:only-child { padding-top: 0; }
+.org li:first-child::before, .org li:last-child::after { border: 0 none; }
+.org li:last-child::before { border-right: 2px solid #c9d1db; border-radius: 0 6px 0 0; }
+.org li:first-child::after { border-radius: 6px 0 0 0; }
+.org ul ul::before { content: ""; position: absolute; top: 0; left: 50%; height: 20px; border-left: 2px solid #c9d1db; }
+.org > ul > li { padding-top: 0; }
+.org > ul > li::before, .org > ul > li::after { display: none; }
+.org-node { direction: rtl; display: inline-flex; flex-direction: column; align-items: center; gap: 2px; min-width: 150px; max-width: 190px;
+  padding: 10px 12px; background: var(--panel); border: 1px solid var(--line); border-top: 3px solid var(--accent); border-radius: 8px; box-shadow: var(--shadow); }
+.org-node.hit { outline: 3px solid var(--accent); }
+.org-node.dept { border-top-color: var(--brand); min-width: 190px; max-width: 240px; }
+.org-name { font-weight: 700; font-size: 13px; color: var(--ink); }
+.org-title { font-size: 12px; color: var(--muted); }
+.org-dept { font-size: 11px; background: var(--soft); border-radius: 999px; padding: 1px 8px; margin-top: 2px; }
+.org-toggle { margin-top: 4px; font: inherit; font-size: 11px; border: 1px solid var(--line); background: var(--soft); border-radius: 999px; padding: 1px 10px; cursor: pointer; }
+.org-members { display: block !important; text-align: start; padding: 6px 0 0 !important; font-size: 12px; }
+.org-members::before, .org-members li::before, .org-members li::after { display: none !important; }
+.org-members li { padding: 2px 0 !important; text-align: start; }
+@media print { .org { overflow: visible; } }

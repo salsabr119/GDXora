@@ -9,6 +9,7 @@ import * as H from "./screens/hr.jsx";
 import * as Y from "./screens/payroll.jsx";
 import * as C from "./screens/settings.jsx";
 import * as R from "./screens/reports.jsx";
+import { OrgChart } from "./screens/orgchart.jsx";
 
 export const NAV = [
   { group: ["الرئيسية", "Home"], items: [
@@ -40,6 +41,7 @@ export const NAV = [
   { group: ["الموارد البشرية", "Human resources"], module: "hr", items: [
     { path: "/hr/employees", label: ["الموظفون", "Employees"], perm: "hr.view", component: H.Employees },
     { path: "/hr/leave", label: ["الإجازات", "Leave"], perm: "hr.view", component: H.Leave },
+    { path: "/hr/org-chart", label: ["الهيكل الوظيفي", "Org chart"], perm: "hr.view", component: OrgChart },
     { path: "/hr/departments", label: ["الأقسام", "Departments"], perm: "hr.view", component: H.Departments },
     { path: "/hr/eosb", label: ["مكافأة نهاية الخدمة", "End of service"], perm: "hr.view", component: H.Eosb },
   ]},
