@@ -71,7 +71,8 @@ export function RecordForm({ fields, value, onChange, lookups, invalid }) {
  * Resource screen.
  * cfg: { table, title, sub, select, order, managePerm, columns, fields, defaults,
  *        search: [keys], loadLookups: async () => ({}), onRow(row) (custom navigation),
- *        canDelete, filter(query) }
+ *        canDelete, filter(query), importable, importer (custom import dialog),
+ *        toForm(row) (row → form value), saveRecords([records]) (custom persistence for form + import) }
  */
 export function Resource({ cfg }) {
   const { t, can } = useApp();
@@ -110,7 +111,8 @@ export function Resource({ cfg }) {
       record[f.key] = v;
     }
     const ok = await act(async () => {
-      if (edit.id) await run(supabase.from(cfg.table).update(record).eq("id", edit.id));
+      if (cfg.saveRecords) await cfg.saveRecords([edit.id ? { ...record, id: edit.id } : record]);
+      else if (edit.id) await run(supabase.from(cfg.table).update(record).eq("id", edit.id));
       else await run(supabase.from(cfg.table).insert(record));
       return true;
     }, t("تم الحفظ", "Saved"));
@@ -137,8 +139,8 @@ export function Resource({ cfg }) {
                        onClose={() => setImporting(false)} onDone={() => { setImporting(false); list.reload(); }} />;
       })()}
       <Panel pad={false}>
-        <Table columns={cfg.columns} rows={rows} loading={list.loading}
-               onRow={cfg.onRow || ((r) => { v.clear(); setEdit({ ...r }); })} />
+        <Table columns={cfg.columns} rows={rows} loading={list.loading} ctx={lookups.data}
+               onRow={cfg.onRow || ((r) => { v.clear(); setEdit(cfg.toForm ? cfg.toForm(r) : { ...r }); })} />
       </Panel>
       {edit && (
         <Modal title={edit.id ? t("تعديل", "Edit") + " — " + (edit.code || edit.name_ar || "") : cfg.newTitle || t("إضافة جديد", "Add new")}
@@ -226,7 +228,9 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
     if (!v.check(bad.slice(0, 200).flatMap((r) => r.errors.map((e) => t(`سطر ${r.line}: ${e}`, `Row ${r.line}: ${e}`))))) return;
     const ok = await act(async () => {
       // one request → one statement: either every row is saved or none is
-      await run(supabase.from(cfg.table).insert(result.rows.map((r) => r.record), { defaultToNull: false }));
+      const records = result.rows.map((r) => r.record);
+      if (cfg.saveRecords) await cfg.saveRecords(records);
+      else await run(supabase.from(cfg.table).insert(records, { defaultToNull: false }));
       return true;
     }, t(`تم استيراد ${result.rows.length} سجل`, `Imported ${result.rows.length} records`));
     if (ok) onDone();

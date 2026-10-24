@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { supabase, rpc, run } from "../supabase.js";
+import { Fragment, useState } from "react";
+import { supabase, rpc, run, getOrg } from "../supabase.js";
 import { RecordForm, validateRecord } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading } from "../ui.jsx";
 import { isVatNumber, isSaIban, today } from "../lib/format.js";
@@ -81,11 +81,12 @@ export function Company() {
 
 /* ── users & roles ───────────────────────────────────────────────────── */
 export function Users() {
-  const { t, lang } = useApp();
+  const { t, lang, notify } = useApp();
   const [tab, setTab] = useState("members");
   const [act, busy] = useAction();
   const iss = useIssues();
   const [add, setAdd] = useState(null);
+  const [newRole, setNewRole] = useState(null);
   const [role, setRole] = useState("accountant");
   const d = useData(async () => ({
     members: await run(supabase.from("org_members").select("*").order("created_at")),
@@ -112,38 +113,100 @@ export function Users() {
   async function updateMember(m, patch) {
     if (await act(async () => { await run(supabase.from("org_members").update(patch).eq("user_id", m.user_id)); return true; }, t("تم التحديث", "Updated"))) d.reload();
   }
+  // an existing GDXora account is added directly; a new address gets an invitation e-mail
   async function addMember(e) {
     e.preventDefault();
     if (!iss.check(validateRecord(memFields, add, t))) return;
-    if (await act(() => rpc("add_member", { p_email: add.email, p_role: add.role_key, p_full_name: add.full_name || null }), t("تمت إضافة المستخدم", "User added"))) { setAdd(null); d.reload(); }
+    const r = await act(async () => {
+      const { data: { session } } = await supabase.auth.getSession();
+      const resp = await fetch("/api/invite", { method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${session?.access_token}`, "x-org-id": getOrg() },
+        body: JSON.stringify({ email: add.email, role_key: add.role_key, full_name: add.full_name || null }) });
+      const body = await resp.json().catch(() => ({}));
+      if (!resp.ok) throw new Error(body.error || `HTTP ${resp.status}`);
+      return body;
+    });
+    if (r) {
+      notify(r.invited ? t(`أُرسلت دعوة إلى ${add.email} — يفتح الرابط في بريده ويختار كلمة المرور`, `Invitation sent to ${add.email}`)
+                       : t("تمت إضافة المستخدم", "User added"), "ok");
+      setAdd(null); d.reload();
+    }
   }
+  const BUILTIN = ["admin", "accountant", "finance_manager", "sales", "project_manager", "hr", "viewer"];
+  async function createRole(e) {
+    e.preventDefault();
+    if (!iss.check([!String(newRole.name_ar || "").trim() && { key: "name_ar", msg: t("اكتب اسم الدور", "Enter the role name") }])) return;
+    const key = `custom_${Date.now().toString(36)}`;
+    const ok = await act(async () => {
+      await run(supabase.from("roles").insert({ org_id: getOrg(), key, name_ar: newRole.name_ar.trim(), name_en: newRole.name_en || newRole.name_ar.trim() }));
+      const copy = newRole.copy_from ? rp.filter((x) => x.role_key === newRole.copy_from).map((x) => ({ org_id: getOrg(), role_key: key, perm_key: x.perm_key })) : [];
+      if (copy.length) await run(supabase.from("role_permissions").insert(copy));
+      return true;
+    }, t("تم إنشاء الدور — حدّد صلاحياته", "Role created — choose its permissions"));
+    if (ok) { setNewRole(null); setRole(key); d.reload(); }
+  }
+  async function deleteRole() {
+    const used = members.filter((m) => m.role_key === role && !m.is_owner).length;
+    if (used) { iss.check([t(`لا يمكن حذف الدور: ${used} مستخدم مرتبط به — غيّر دورهم أولاً`, `Cannot delete: ${used} user(s) have this role — change their role first`)]); return; }
+    if (!window.confirm(t("حذف هذا الدور؟", "Delete this role?"))) return;
+    const ok = await act(async () => {
+      await run(supabase.from("role_permissions").delete().eq("role_key", role));
+      await run(supabase.from("roles").delete().eq("key", role));
+      return true;
+    }, t("تم حذف الدور", "Role deleted"));
+    if (ok) { setRole("accountant"); d.reload(); }
+  }
+  const MODULES = { core: t("النظام والمستخدمون", "System & users"), accounting: t("المحاسبة", "Accounting"), sales: t("المبيعات والفوترة", "Sales & invoicing"),
+                    finance: t("المالية", "Finance"), projects: t("المشاريع", "Projects"), hr: t("الموارد البشرية", "HR"),
+                    payroll: t("الرواتب", "Payroll"), integrations: t("الربط والتكامل", "Integrations") };
 
   return (
     <>
-      <PageHead title={t("المستخدمون والصلاحيات", "Users & roles")}>
-        {tab === "members" && <button className="btn primary" onClick={() => setAdd({ role_key: "accountant" })}>{t("+ إضافة مستخدم", "+ Add user")}</button>}
+      <PageHead title={t("المستخدمون والصلاحيات", "Users & roles")}
+                sub={t("كل مستخدم يرى أقسام دوره فقط — المالك ومدير النظام يرون كل شيء", "Each user sees only their role's modules — the owner and administrators see everything")}>
+        {tab === "members" && <button className="btn primary" onClick={() => { iss.clear(); setAdd({ role_key: "accountant" }); }}>{t("+ إضافة / دعوة مستخدم", "+ Add / invite user")}</button>}
+        {tab === "roles" && <button className="btn primary" onClick={() => { iss.clear(); setNewRole({}); }}>{t("+ دور جديد", "+ New role")}</button>}
       </PageHead>
       <Tabs value={tab} onChange={setTab} tabs={[["members", t("المستخدمون", "Users")], ["roles", t("صلاحيات الأدوار", "Role permissions")]]} />
       {tab === "members" && <Panel pad={false}>
         <Table rows={members} columns={[
           { key: "full_name", label: t("الاسم", "Name"), render: (m) => <>{m.full_name || "—"} {m.is_owner && <Badge kind="info">{t("المالك", "Owner")}</Badge>}</> },
           { key: "email", label: t("البريد", "E-mail"), render: (m) => <span className="mono">{m.email || "—"}</span> },
-          { key: "role_key", label: t("الدور", "Role"), render: (m) => m.is_owner ? t("كل الصلاحيات", "All permissions")
+          { key: "role_key", label: t("الدور", "Role"), exportValue: (m) => (m.is_owner ? t("المالك", "Owner") : roleOpts.find((r) => r.id === m.role_key)?.label), render: (m) => m.is_owner ? t("كل الصلاحيات", "All permissions")
               : <select value={m.role_key} style={{ width: 180 }} disabled={busy} onChange={(e) => updateMember(m, { role_key: e.target.value })}>
                   {roleOpts.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select> },
-          { key: "active", label: t("الحالة", "Status"), render: (m) => m.is_owner ? <Badge kind="ok">{t("نشط", "Active")}</Badge>
+          { key: "active", label: t("الحالة", "Status"), exportValue: (m) => (m.active ? t("نشط", "Active") : t("موقوف", "Disabled")), render: (m) => m.is_owner ? <Badge kind="ok">{t("نشط", "Active")}</Badge>
               : <button className={`btn sm ${m.active ? "" : "danger"}`} disabled={busy} onClick={() => updateMember(m, { active: !m.active })}>{m.active ? t("نشط — إيقاف", "Active — disable") : t("موقوف — تفعيل", "Disabled — enable")}</button> },
         ]} />
       </Panel>}
-      {tab === "roles" && <Panel title={<select value={role} style={{ width: 220 }} onChange={(e) => setRole(e.target.value)}>{roleOpts.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select>} pad={false}>
-        <table className="tbl"><tbody>{perms.map((p) => (
-          <tr key={p.key}><td style={{ width: 40 }}><input type="checkbox" checked={has.has(p.key)} disabled={busy} onChange={() => toggle(p.key)} /></td>
-            <td>{lang === "en" ? p.name_en : p.name_ar}</td><td className="muted mono">{p.key}</td></tr>))}</tbody></table>
-      </Panel>}
+      {tab === "roles" && <>
+        {role === "admin" && <div className="alert">{t("مدير النظام يملك كل الصلاحيات، ويُنصح بإبقائه كذلك.", "Administrators hold every permission; keep it that way.")}</div>}
+        <Issues issues={!add && !newRole ? iss.issues : []} />
+        <Panel title={<select value={role} style={{ width: 240 }} onChange={(e) => setRole(e.target.value)}>{roleOpts.map((r) => <option key={r.id} value={r.id}>{r.label}</option>)}</select>} pad={false}
+               actions={!BUILTIN.includes(role) && <button className="btn sm danger" disabled={busy} onClick={deleteRole}>{t("حذف الدور", "Delete role")}</button>}>
+          <table className="tbl"><tbody>{Object.keys(MODULES).filter((mod) => perms.some((p) => p.module === mod)).map((mod) => (
+            <Fragment key={mod}>
+              <tr><td colSpan={3} style={{ fontWeight: 700, color: "var(--brand)", background: "var(--soft)" }}>{MODULES[mod]}</td></tr>
+              {perms.filter((p) => p.module === mod).map((p) => (
+                <tr key={p.key}><td style={{ width: 40 }}><input type="checkbox" checked={has.has(p.key)} disabled={busy} onChange={() => toggle(p.key)} /></td>
+                  <td>{lang === "en" ? p.name_en : p.name_ar}</td><td className="muted mono">{p.key}</td></tr>))}
+            </Fragment>))}</tbody></table>
+        </Panel>
+      </>}
+      {newRole && <Modal title={t("دور جديد", "New role")} onClose={() => { setNewRole(null); iss.clear(); }}
+        footer={<><button className="btn" onClick={() => setNewRole(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="nr" disabled={busy}>{t("إنشاء", "Create")}</button></>}>
+        <form id="nr" onSubmit={createRole} noValidate>
+          <Issues issues={iss.issues} />
+          <RecordForm value={newRole} onChange={setNewRole} invalid={iss.has} fields={[
+            { key: "name_ar", label: t("اسم الدور", "Role name"), required: true, hint: t("مثال: محاسب مشاريع، مدير موارد بشرية", "e.g. Project accountant, HR manager") },
+            { key: "name_en", label: t("الاسم بالإنجليزي", "English name"), ltr: true },
+            { key: "copy_from", label: t("انسخ الصلاحيات من دور (اختياري)", "Copy permissions from (optional)"), type: "select", options: roleOpts }]} />
+        </form>
+      </Modal>}
       {add && <Modal title={t("إضافة مستخدم", "Add user")} onClose={() => { setAdd(null); iss.clear(); }}
         footer={<><button className="btn" onClick={() => setAdd(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="mem" disabled={busy}>{t("إضافة", "Add")}</button></>}>
         <form id="mem" onSubmit={addMember} noValidate>
-          <div className="alert">{t("يجب أن يكون لدى المستخدم حساب في GDXora (يسجّل من صفحة الدخول) ثم تضيفه هنا ببريده.", "The user signs up on the login page first, then you add them here by e-mail.")}</div>
+          <div className="alert">{t("إذا كان لدى الشخص حساب في GDXora يُضاف مباشرة، وإلا تصله دعوة على بريده ليختار كلمة المرور.", "An existing GDXora account is added directly; otherwise an invitation e-mail is sent.")}</div>
           <Issues issues={iss.issues} />
           <RecordForm value={add} onChange={setAdd} fields={memFields} invalid={iss.has} />
         </form>

@@ -97,14 +97,14 @@ export function Projects() {
   return <Resource cfg={{
     table: "projects", title: t("المشاريع والعقود", "Projects & contracts"),
     sub: t("كل الإيرادات والتكاليف (فواتير، موردين، رواتب) تُحمّل على المشروع لتظهر ربحيته مباشرة", "Revenue and costs (invoices, bills, payroll) are tagged to projects for live profitability"),
-    select: "*, customers(name_ar)", order: "created_at.desc", managePerm: "projects.manage",
+    select: "*", order: "created_at.desc", managePerm: "projects.manage",
     search: ["code", "name_ar", "contract_no"], onRow: (r) => go(`/projects/${r.id}`), importer: ProjectImportDialog,
-    loadLookups: async () => ({ customers: await L.customers() }),
+    loadLookups: async () => ({ customers: await L.customerNames() }),
     defaults: { status: "active", contract_value: 0, retention_pct: 10, advance_amount: 0, advance_recovery_pct: 0 },
     columns: [
       { key: "code", label: t("الرمز", "Code"), render: (r) => <span className="mono">{r.code}</span> },
       { key: "name_ar", label: t("المشروع", "Project") },
-      { key: "c", label: t("العميل", "Customer"), render: (r) => r.customers?.name_ar || "—" },
+      { key: "c", label: t("العميل", "Customer"), render: (r, lk) => lk?.customers?.find((c) => c.id === r.customer_id)?.name_ar || "—" },
       { key: "contract_value", label: t("قيمة العقد", "Contract value"), type: "money" },
       { key: "status", label: t("الحالة", "Status"), render: (r) => <StatusBadge status={r.status} /> },
     ],
@@ -121,7 +121,7 @@ export function ProjectDetail({ params }) {
   const iss = useIssues();
   const d = useData(async () => {
     const [p, sum, boq, budget, billings, invoices, bills] = await Promise.all([
-      run(supabase.from("projects").select("*, customers(name_ar)").eq("id", params.id).single()),
+      run(supabase.from("projects").select("*").eq("id", params.id).single()),
       rpc("project_summary", { p_project: params.id }),
       run(supabase.from("project_boq_items").select("*").eq("project_id", params.id).order("sort").order("item_no")),
       run(supabase.from("project_budget_lines").select("*").eq("project_id", params.id)),
@@ -131,7 +131,7 @@ export function ProjectDetail({ params }) {
     ]);
     return { p, s: sum?.[0], boq, budget, billings, invoices, bills };
   }, [params.id]);
-  const lk = useData(async () => ({ customers: await L.customers() }), []);
+  const lk = useData(async () => ({ customers: await L.customerNames() }), []);
 
   if (!d.data) return <Loading />;
   const { p, s, boq, budget, billings, invoices, bills } = d.data;
@@ -185,7 +185,7 @@ export function ProjectDetail({ params }) {
 
   return (
     <>
-      <PageHead title={`${p.code} — ${p.name_ar}`} sub={<span className="row"><StatusBadge status={p.status} />{p.customers?.name_ar}</span>}>
+      <PageHead title={`${p.code} — ${p.name_ar}`} sub={<span className="row"><StatusBadge status={p.status} />{lk.data?.customers?.find((c) => c.id === p.customer_id)?.name_ar}</span>}>
         <button className="btn" onClick={() => go("/projects")}>{t("رجوع", "Back")}</button>
         {manage && <button className="btn" onClick={() => setEdit({ ...p })}>{t("تعديل", "Edit")}</button>}
         {manage && boq.length > 0 && <button className="btn primary" onClick={newBilling} disabled={busy}>{t("+ مستخلص جديد", "+ New progress billing")}</button>}

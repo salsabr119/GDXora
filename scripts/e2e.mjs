@@ -99,10 +99,10 @@ assert.equal(must(await alice.rpc("post_payment", { p_payment: rv.id })), "RV-00
 ok("receipt voucher posted");
 
 // payroll
-must(await alice.from("employees").insert([
+must(await alice.rpc("save_employees", { p_rows: [
   { first_name_ar: "نواف", last_name_ar: "الشهري", nationality: "SA", hire_date: "2022-03-01", basic_salary: 12000, housing_allowance: 3000, transport_allowance: 1000 },
   { first_name_ar: "أحمد", last_name_ar: "حسن", nationality: "EG", hire_date: "2024-01-15", basic_salary: 6000, housing_allowance: 1500 },
-], { defaultToNull: false }));
+] }));
 const run = must(await alice.rpc("generate_payroll", { p_period: "2026-08" }));
 must(await alice.rpc("approve_payroll", { p_run: run }));
 must(await alice.rpc("post_payroll", { p_run: run }));
