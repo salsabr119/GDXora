@@ -59,7 +59,7 @@ function OpeningImportDialog({ onClose }) {
   const [date, setDate] = useState(today().slice(0, 4) + "-01-01");
   const [res, setRes] = useState(null);
   const lk = useData(async () => {
-    const [accounts, projects, customers, vendors, employees] = await Promise.all([L.accounts(), L.projects(), L.customers(), L.vendors(), L.employees()]);
+    const [accounts, projects, customers, vendors, employees] = await Promise.all([L.accounts(), L.projects(), L.customerNames(), L.vendors().catch(() => []), L.employees()]);
     return { accounts, projects, parties: { customer: customers, vendor: vendors, employee: employees } };
   }, []);
   const fields = [

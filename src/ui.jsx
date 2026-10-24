@@ -156,12 +156,12 @@ export function Modal({ title, onClose, children, footer, wide }) {
  * Table with typed columns.
  * columns: [{ key, label, type: 'money'|'date'|'num'|'badge', render(row), n }]
  */
-export function Table({ columns, rows, onRow, empty, footer, loading, exportName, exportable = true }) {
+export function Table({ columns, rows, onRow, empty, footer, loading, exportName, exportable = true, ctx }) {
   const { t } = useApp();
   const [act, busy] = useAction();
   if (loading && !rows) return <div className="empty">{t("جارِ التحميل…", "Loading…")}</div>;
   if (!rows || rows.length === 0) return <div className="empty">{empty || t("لا توجد بيانات بعد", "Nothing here yet")}</div>;
-  const onExport = () => act(() => exportTable({ columns, rows, t, name: exportName }));
+  const onExport = () => act(() => exportTable({ columns, rows, t, name: exportName, ctx }));
   return (
     <>
       {exportable && <div className="tbl-tools"><button className="btn sm ghost" onClick={onExport} disabled={busy}>
@@ -174,7 +174,7 @@ export function Table({ columns, rows, onRow, empty, footer, loading, exportName
             <tr key={r.id || i} className={onRow ? "click" : ""} onClick={onRow ? () => onRow(r) : undefined}>
               {columns.map((c) => (
                 <td key={c.key || c.label} className={c.type === "money" || c.type === "num" || c.n ? "n" : ""}>
-                  {c.render ? c.render(r) : c.type === "money" ? <Money v={r[c.key]} currency={null} />
+                  {c.render ? c.render(r, ctx) : c.type === "money" ? <Money v={r[c.key]} currency={null} />
                     : c.type === "date" ? <DateText v={r[c.key]} />
                     : c.type === "num" ? Number(r[c.key] || 0).toLocaleString("en")
                     : r[c.key] ?? "—"}
@@ -205,7 +205,7 @@ export function nodeText(node, t) {
   return nodeText(node.props?.children, t);
 }
 
-async function exportTable({ columns, rows, t, name }) {
+async function exportTable({ columns, rows, t, name, ctx }) {
   const { exportXlsx } = await import("./lib/excel.js");
   const title = name || document.querySelector(".page-head h1")?.textContent || "export";
   const cols = columns.filter((c) => c.label && c.export !== false).map((c) => ({
@@ -214,7 +214,7 @@ async function exportTable({ columns, rows, t, name }) {
     value: (r) => {
       if (c.exportValue) return c.exportValue(r);
       if (!c.render) return c.type === "money" || c.type === "num" ? Number(r[c.key] || 0) : r[c.key];
-      const v = nodeText(c.render(r), t);
+      const v = nodeText(c.render(r, ctx), t);
       return v === "—" ? "" : v;
     },
   }));

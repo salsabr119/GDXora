@@ -47,7 +47,7 @@ export function PayrollRun({ params }) {
   const [changes, setChanges] = useState({});
   const d = useData(async () => ({
     run: await run(supabase.from("payroll_runs").select("*").eq("id", params.id).single()),
-    lines: await run(supabase.from("payroll_lines").select("*, employees(code, first_name_ar, last_name_ar, national_id, iban, bank_name), projects(name_ar)").eq("run_id", params.id)),
+    lines: await run(supabase.from("payroll_lines").select("*, employees(code, first_name_ar, last_name_ar, national_id, employee_pay(iban, bank_name)), projects(name_ar)").eq("run_id", params.id)),
   }), [params.id]);
   if (!d.data) return <Loading />;
   const r = d.data.run;
@@ -80,11 +80,12 @@ export function PayrollRun({ params }) {
     if (!window.confirm(t("حذف المسيّر (مسودة)؟", "Delete draft payroll?"))) return;
     if (await act(async () => { await run(supabase.from("payroll_runs").delete().eq("id", r.id)); return true; })) go("/payroll");
   }
+  const payOf = (e) => (Array.isArray(e?.employee_pay) ? e.employee_pay[0] : e?.employee_pay);
   // bank / WPS transfer sheet (review with your bank's exact template before upload)
   const exportBank = () => downloadCsv(`payroll-${r.period}-bank.csv`, lines, [
     { label: "Employee No", value: (l) => l.employees.code }, { label: "Name", value: (l) => `${l.employees.first_name_ar} ${l.employees.last_name_ar}` },
-    { label: "National ID / Iqama", value: (l) => l.employees.national_id || "" }, { label: "Bank", value: (l) => l.employees.bank_name || "" },
-    { label: "IBAN", value: (l) => l.employees.iban || "" }, { label: "Basic", value: (l) => num(l.basic) }, { label: "Housing", value: (l) => num(l.housing) },
+    { label: "National ID / Iqama", value: (l) => l.employees.national_id || "" }, { label: "Bank", value: (l) => payOf(l.employees)?.bank_name || "" },
+    { label: "IBAN", value: (l) => payOf(l.employees)?.iban || "" }, { label: "Basic", value: (l) => num(l.basic) }, { label: "Housing", value: (l) => num(l.housing) },
     { label: "Other earnings", value: (l) => num(Number(l.transport) + Number(l.other_allowances) + Number(l.overtime) + Number(l.additions)) },
     { label: "Deductions", value: (l) => num(Number(l.gosi_employee) + Number(l.advance_deduction) + Number(l.other_deductions)) },
     { label: "Net", value: (l) => num(l.net) }, { label: "Payer", value: () => org.name_ar },

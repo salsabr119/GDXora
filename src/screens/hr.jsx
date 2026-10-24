@@ -16,25 +16,11 @@ const REASONS = (t) => [
   { id: "retirement", label: t("تقاعد", "Retirement") }, { id: "death", label: t("وفاة", "Death") },
 ];
 
-export function Employees() {
-  const { t } = useApp();
-  return <Resource cfg={{
-    table: "employees", title: t("الموظفون", "Employees"), select: "*, departments(name_ar), projects(name_ar)", order: "code.asc",
-    managePerm: "hr.manage", search: ["code", "first_name_ar", "last_name_ar", "national_id", "job_title", "phone"],
-    loadLookups: async () => ({ departments: await L.departments(), projects: await L.projects() }),
-    defaults: { nationality: "SA", contract_type: "unlimited", status: "active", hire_date: today(), gosi_registered: true, gosi_scheme: "legacy",
-                annual_leave_days: 21, basic_salary: 0, housing_allowance: 0, transport_allowance: 0, other_allowances: 0 },
-    columns: [
-      { key: "code", label: t("الرقم", "No."), render: (r) => <span className="mono">{r.code}</span> },
-      { key: "name", label: t("الاسم", "Name"), render: (r) => `${r.first_name_ar} ${r.last_name_ar}` },
-      { key: "job_title", label: t("المسمى", "Title") },
-      { key: "d", label: t("القسم", "Department"), render: (r) => r.departments?.name_ar || "—" },
-      { key: "p", label: t("المشروع", "Project"), render: (r) => r.projects?.name_ar || "—" },
-      { key: "nationality", label: t("الجنسية", "Nationality"), render: (r) => r.is_saudi ? t("سعودي", "Saudi") : r.nationality },
-      { key: "total", label: t("إجمالي الراتب", "Total pay"), n: true, render: (r) => <Money v={Number(r.basic_salary) + Number(r.housing_allowance) + Number(r.transport_allowance) + Number(r.other_allowances)} currency={null} /> },
-      { key: "status", label: t("الحالة", "Status"), render: (r) => <StatusBadge status={r.status} /> },
-    ],
-    fields: [
+const PAY_KEYS = ["basic_salary", "housing_allowance", "transport_allowance", "other_allowances", "bank_name", "iban"];
+const payOf = (r) => (Array.isArray(r?.employee_pay) ? r.employee_pay[0] : r?.employee_pay) || null;
+const totalPay = (p) => (p ? Number(p.basic_salary) + Number(p.housing_allowance) + Number(p.transport_allowance) + Number(p.other_allowances) : null);
+
+const EMPLOYEE_FIELDS = (t) => [
       { section: t("البيانات الشخصية", "Personal") },
       { key: "first_name_ar", label: t("الاسم الأول", "First name (AR)"), required: true },
       { key: "last_name_ar", label: t("اسم العائلة", "Last name (AR)"), required: true },
@@ -59,7 +45,7 @@ export function Employees() {
       { key: "termination_date", label: t("تاريخ انتهاء الخدمة", "Termination date"), type: "date", validate: (v, r) => (r.hire_date && v < r.hire_date ? t("تاريخ انتهاء الخدمة قبل تاريخ المباشرة", "Termination date is before the hire date") : null) },
       { key: "termination_reason", label: t("سبب انتهاء الخدمة", "Termination reason"), type: "select", options: REASONS(t) },
       { key: "annual_leave_days", label: t("أيام الإجازة السنوية", "Annual leave days"), type: "number" },
-      { section: t("الراتب الشهري", "Monthly pay") },
+      { section: t("الراتب الشهري", "Monthly pay"), pay: true },
       { key: "basic_salary", label: t("الراتب الأساسي", "Basic salary"), type: "money", required: true, validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
       { key: "housing_allowance", label: t("بدل السكن", "Housing"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
       { key: "transport_allowance", label: t("بدل النقل", "Transport"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
@@ -71,7 +57,32 @@ export function Employees() {
       { key: "bank_name", label: t("البنك", "Bank") },
       { key: "iban", label: t("الآيبان (لملف حماية الأجور)", "IBAN (for WPS)"), ltr: true, transform: (v) => (v || "").replace(/\s/g, "").toUpperCase() || null, validate: (v) => (isSaIban(v) ? null : t("الآيبان غير صحيح — SA متبوعاً بـ 22 رقماً", "Invalid IBAN — SA followed by 22 digits")) },
       { key: "notes", label: t("ملاحظات", "Notes"), type: "textarea", wide: true },
+    ];
+
+export function Employees() {
+  const { t, can } = useApp();
+  const salaries = can("hr.salaries");
+  const fields = EMPLOYEE_FIELDS(t).filter((f) => salaries || !(PAY_KEYS.includes(f.key) || f.pay));
+  return <Resource cfg={{
+    table: "employees", title: t("الموظفون", "Employees"), select: salaries ? "*, departments(name_ar), employee_pay(*)" : "*, departments(name_ar)", order: "code.asc",
+    // salaries live in employee_pay (permission hr.salaries); one database call saves both, for the form and the Excel import
+    toForm: (r) => { const { employee_pay: _p, departments: _d, ...rest } = r; return { ...rest, ...(payOf(r) ? Object.fromEntries(PAY_KEYS.map((k) => [k, payOf(r)[k]])) : {}) }; },
+    saveRecords: (rows) => rpc("save_employees", { p_rows: rows }),
+    managePerm: "hr.manage", search: ["code", "first_name_ar", "last_name_ar", "national_id", "job_title", "phone"],
+    loadLookups: async () => ({ departments: await L.departments(), projects: await L.projects() }),
+    defaults: { nationality: "SA", contract_type: "unlimited", status: "active", hire_date: today(), gosi_registered: true, gosi_scheme: "legacy",
+                annual_leave_days: 21, ...(salaries ? { basic_salary: 0, housing_allowance: 0, transport_allowance: 0, other_allowances: 0 } : {}) },
+    columns: [
+      { key: "code", label: t("الرقم", "No."), render: (r) => <span className="mono">{r.code}</span> },
+      { key: "name", label: t("الاسم", "Name"), render: (r) => `${r.first_name_ar} ${r.last_name_ar}` },
+      { key: "job_title", label: t("المسمى", "Title") },
+      { key: "d", label: t("القسم", "Department"), render: (r) => r.departments?.name_ar || "—" },
+      { key: "p", label: t("المشروع", "Project"), render: (r, lk) => lk?.projects?.find((p) => p.id === r.project_id)?.name_ar || "—" },
+      { key: "nationality", label: t("الجنسية", "Nationality"), render: (r) => r.is_saudi ? t("سعودي", "Saudi") : r.nationality },
+      ...(salaries ? [{ key: "total", label: t("إجمالي الراتب", "Total pay"), n: true, render: (r) => (payOf(r) ? <Money v={totalPay(payOf(r))} currency={null} /> : "—") }] : []),
+      { key: "status", label: t("الحالة", "Status"), render: (r) => <StatusBadge status={r.status} /> },
     ],
+    fields,
   }} />;
 }
 
@@ -150,18 +161,19 @@ export function Leave() {
 }
 
 export function Eosb() {
-  const { t } = useApp();
-  const emps = useData(() => run(supabase.from("employees").select("*").order("code")), []);
+  const { t, can } = useApp();
+  const emps = useData(() => run(supabase.from("employees").select(can("hr.salaries") || can("payroll.view") ? "*, employee_pay(*)" : "*").order("code")), []);
   const [f, setF] = useState({ employee_id: null, wage: 10000, start: "2020-01-01", end: today(), reason: "employer_termination" });
   const pick = (id) => {
     const e = (emps.data || []).find((x) => x.id === id);
     if (!e) return setF({ ...f, employee_id: null });
-    setF({ employee_id: id, wage: Number(e.basic_salary) + Number(e.housing_allowance) + Number(e.transport_allowance) + Number(e.other_allowances),
+    setF({ employee_id: id, wage: payOf(e) ? totalPay(payOf(e)) : f.wage,
            start: e.hire_date, end: e.termination_date || today(), reason: e.termination_reason || "employer_termination" });
   };
   const r = eosb(Number(f.wage || 0), f.start, f.end, f.reason);
   const emp = (emps.data || []).find((x) => x.id === f.employee_id);
-  const g = emp ? gosi({ basic: emp.basic_salary, housing: emp.housing_allowance, isSaudi: emp.is_saudi, registered: emp.gosi_registered, scheme: emp.gosi_scheme }) : null;
+  const pay = payOf(emp);
+  const g = emp && pay ? gosi({ basic: pay.basic_salary, housing: pay.housing_allowance, isSaudi: emp.is_saudi, registered: emp.gosi_registered, scheme: emp.gosi_scheme }) : null;
   return (
     <>
       <PageHead title={t("حاسبة مكافأة نهاية الخدمة", "End-of-service calculator")} sub={t("وفق المادتين 84 و85 من نظام العمل السعودي", "Per Saudi Labour Law articles 84 & 85")} />

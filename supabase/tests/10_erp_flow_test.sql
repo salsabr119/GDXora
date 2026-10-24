@@ -244,12 +244,12 @@ select t.ok((select closing from trial_balance() where code = '2101') = 0, 'AP s
 select t.ok((select closing from trial_balance() where code = '2106') = -5000, 'retention payable kept');
 
 -- ── 9. payroll ──────────────────────────────────────────────────────────
-insert into employees (first_name_ar, last_name_ar, nationality, hire_date, basic_salary, housing_allowance, transport_allowance, project_id)
-values ('فهد', 'العتيبي', 'SA', '2020-01-01', 10000, 2500, 500, :'prj') returning id as emp_sa \gset
-insert into employees (first_name_ar, last_name_ar, nationality, hire_date, basic_salary, housing_allowance, gosi_scheme)
-values ('راجيش', 'كومار', 'IN', '2023-05-10', 4000, 1000, 'legacy') returning id as emp_in \gset
-insert into employees (first_name_ar, last_name_ar, nationality, hire_date, basic_salary, housing_allowance)
-values ('سارة', 'القحطاني', 'SA', '2026-09-16', 9000, 0) returning id as emp_mid \gset
+select (save_employees(jsonb_build_array(jsonb_build_object('first_name_ar', 'فهد', 'last_name_ar', 'العتيبي', 'nationality', 'SA',
+          'hire_date', '2020-01-01', 'basic_salary', 10000, 'housing_allowance', 2500, 'transport_allowance', 500, 'project_id', :'prj'))))[1] as emp_sa \gset
+select (save_employees('[{"first_name_ar": "راجيش", "last_name_ar": "كومار", "nationality": "IN", "hire_date": "2023-05-10",
+          "basic_salary": 4000, "housing_allowance": 1000, "gosi_scheme": "legacy"}]'))[1] as emp_in \gset
+select (save_employees('[{"first_name_ar": "سارة", "last_name_ar": "القحطاني", "nationality": "SA", "hire_date": "2026-09-16",
+          "basic_salary": 9000, "housing_allowance": 0}]'))[1] as emp_mid \gset
 update employees set gosi_scheme = 'new' where id = :'emp_mid';
 
 insert into leave_requests (employee_id, leave_type, start_date, end_date, status)
