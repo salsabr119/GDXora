@@ -12,5 +12,9 @@ import "@fontsource/poppins/latin-500.css";
 import "@fontsource/poppins/latin-600.css";
 import "@fontsource/poppins/latin-700.css";
 import "./styles.css";
+import { reloadForNewVersion } from "./lib/staleBuild.js";
+
+// a tab opened before the latest deployment: reload instead of failing
+window.addEventListener("vite:preloadError", (e) => { if (reloadForNewVersion()) e.preventDefault(); });
 
 createRoot(document.getElementById("root")).render(<React.StrictMode><App /></React.StrictMode>);

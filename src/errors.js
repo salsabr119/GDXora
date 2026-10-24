@@ -1,5 +1,6 @@
 // Map database errors to messages a non-technical user understands.
 const RULES = [
+  [/dynamically imported module|Importing a module script failed|Failed to load module script/i, "تم تحديث النظام إلى نسخة جديدة — حدّث الصفحة ثم أعد المحاولة", "GDXora was updated — reload the page and try again"],
   [/not balanced/i, "القيد غير متوازن — مجموع المدين لا يساوي مجموع الدائن", "Entry is not balanced (debit ≠ credit)"],
   [/at least two lines/i, "القيد يحتاج سطرين على الأقل", "An entry needs at least two lines"],
   [/group, inactive or foreign/i, "لا يمكن الترحيل على حساب رئيسي أو موقوف", "Cannot post to a group or inactive account"],
