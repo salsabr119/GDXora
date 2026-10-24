@@ -1,6 +1,7 @@
 // Shared UI: app context, hash router, and small building blocks.
 import { Component, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { friendlyError } from "./errors.js";
+import { isStaleChunk, reloadForNewVersion } from "./lib/staleBuild.js";
 import { money as fmtMoney, date as fmtDate } from "./lib/format.js";
 
 /* ── app context ─────────────────────────────────────────────────────── */
@@ -85,7 +86,10 @@ export function useToasts(lang) {
     setItems((x) => [...x.slice(-2), { id, text, kind }]);
     setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), kind === "bad" ? 7000 : 3500);
   }, []);
-  const notifyError = useCallback((e) => notify(friendlyError(e, lang), "bad"), [notify, lang]);
+  const notifyError = useCallback((e) => {
+    if (isStaleChunk(e) && reloadForNewVersion()) return;   // new deployment: reload to the new version
+    notify(friendlyError(e, lang), "bad");
+  }, [notify, lang]);
   const view = (
     <div className="toasts">{items.map((i) => <div key={i.id} className={`toast ${i.kind}`}>{i.text}</div>)}</div>
   );
