@@ -3,7 +3,7 @@ import { supabase, rpc, run } from "../supabase.js";
 import { Resource, RecordForm, validateRecord } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Tabs, Select, go, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
-import { today, num, downloadCsv, isVatNumber, isSaIban } from "../lib/format.js";
+import { today, num, isVatNumber, isSaIban } from "../lib/format.js";
 import { DateRange } from "./accounting.jsx";
 
 /* ── vendors ─────────────────────────────────────────────────────────── */
@@ -340,11 +340,10 @@ export function Aging() {
     <>
       <PageHead title={t("أعمار الذمم", "Aging")}>
         <label className="muted">{t("كما في", "As of")}</label><input type="date" style={{ width: 160 }} value={asOf} onChange={(e) => setAsOf(e.target.value)} />
-        <button className="btn" onClick={() => downloadCsv(`aging-${tab}-${asOf}.csv`, rows, cols.map((c) => ({ key: c.key, label: c.label })))}>{t("تصدير", "Export")}</button>
       </PageHead>
       <Tabs value={tab} onChange={setTab} tabs={[["ar", t("مستحقات العملاء", "Receivables")], ["ap", t("مستحقات الموردين", "Payables")]]} />
       <Panel pad={false}>
-        <Table rows={rows} loading={d.loading} columns={cols} footer={<><td>{t("الإجمالي", "Total")}</td>
+        <Table rows={rows} loading={d.loading} columns={cols} exportName={`${tab === "ar" ? t("أعمار ذمم العملاء", "AR aging") : t("أعمار ذمم الموردين", "AP aging")} ${asOf}`} footer={<><td>{t("الإجمالي", "Total")}</td>
           {["current_amt", "d30", "d60", "d90", "over90", "total"].map((k) => <td key={k} className="n"><Money v={sum(k)} currency={null} /></td>)}</>} />
       </Panel>
     </>

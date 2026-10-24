@@ -3,7 +3,7 @@ import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, go, useName, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
-import { today, downloadCsv, num } from "../lib/format.js";
+import { today, num } from "../lib/format.js";
 
 const TYPES = (t) => [
   { id: "asset", label: t("أصول", "Asset") }, { id: "liability", label: t("التزامات", "Liability") },
@@ -249,12 +249,10 @@ export function TrialBalance() {
   return (
     <>
       <PageHead title={t("ميزان المراجعة", "Trial balance")} sub={t("الرصيد الموجب مدين والسالب دائن", "Positive = debit, negative = credit")}>
-        <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}>
-          <button className="btn" onClick={() => downloadCsv(`trial-balance-${to}.csv`, rows, cols.map((c) => ({ key: c.key, label: c.label })))}>{t("تصدير Excel", "Export")}</button>
-        </DateRange>
+        <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} />
       </PageHead>
       <Panel pad={false}>
-        <Table rows={rows} loading={tb.loading} columns={cols} footer={<>
+        <Table rows={rows} loading={tb.loading} columns={cols} exportName={`${t("ميزان المراجعة", "Trial balance")} ${from || ""} - ${to || ""}`} footer={<>
           <td colSpan={2}>{t("الإجمالي", "Total")}</td>
           <td className="n"><Money v={sum("opening")} currency={null} /></td>
           <td className="n"><Money v={sum("debit")} currency={null} /></td>
@@ -286,6 +284,28 @@ export function Statements() {
   const assets = bs("asset", 1), liabilities = bs("liability", -1), equity = bs("equity", -1);
   const sum = (a) => a.reduce((n, r) => n + r.amt, 0);
 
+  async function exportStatements() {
+    const { exportXlsx } = await import("../lib/excel.js");
+    const out = [];
+    const block = (title, rows, total, extra = []) => {
+      out.push({ a: title, b: null });
+      rows.forEach((r) => out.push({ a: `${r.code} — ${r.name_ar}`, b: r.amt }));
+      extra.forEach((x) => out.push(x));
+      out.push({ a: `${t("إجمالي", "Total")} ${title}`, b: total });
+    };
+    out.push({ a: t(`قائمة الدخل من ${from} إلى ${to}`, `Income statement ${from} – ${to}`), b: null });
+    block(t("الإيرادات", "Revenue"), revenue, totRev);
+    block(t("التكاليف والمصروفات", "Costs & expenses"), expense, totExp);
+    out.push({ a: t("صافي الربح (الخسارة)", "Net profit (loss)"), b: totRev - totExp }, { a: "", b: null });
+    out.push({ a: `${t("قائمة المركز المالي في", "Balance sheet at")} ${to}`, b: null });
+    block(t("الأصول", "Assets"), assets, sum(assets));
+    block(t("الالتزامات", "Liabilities"), liabilities, sum(liabilities));
+    block(t("حقوق الملكية", "Equity"), equity, sum(equity) + profitToDate, [{ a: t("أرباح (خسائر) غير مقفلة", "Unclosed profit (loss)"), b: profitToDate }]);
+    out.push({ a: t("الالتزامات + حقوق الملكية", "Liabilities + equity"), b: sum(liabilities) + sum(equity) + profitToDate });
+    await exportXlsx({ filename: `${t("القوائم المالية", "Financial statements")} ${to}`, sheet: t("القوائم المالية", "Statements"),
+                       columns: [{ label: t("البند", "Line"), value: (r) => r.a }, { label: t("المبلغ", "Amount"), type: "money", value: (r) => r.b }], rows: out });
+  }
+
   const Block = ({ title, rows, total, extra }) => (
     <>
       <tr><td colSpan={2} style={{ fontWeight: 700, color: "var(--brand)" }}>{title}</td></tr>
@@ -297,7 +317,10 @@ export function Statements() {
 
   return (
     <>
-      <PageHead title={t("القوائم المالية", "Financial statements")}><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} /></PageHead>
+      <PageHead title={t("القوائم المالية", "Financial statements")}>
+        <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} />
+        <button className="btn" onClick={exportStatements} disabled={!d.data}>⬇ {t("تصدير Excel", "Export to Excel")}</button>
+      </PageHead>
       <div className="grid c2">
         <Panel title={t("قائمة الدخل", "Income statement")} pad={false}>
           <table className="tbl"><tbody>
@@ -338,7 +361,7 @@ export function Ledger() {
         <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} />
       </PageHead>
       <Panel pad={false}>
-        <Table rows={led.data} loading={led.loading} empty={t("اختر حساباً لعرض حركاته", "Choose an account to see its movements")}
+        <Table rows={led.data} loading={led.loading} exportName={`${t("كشف حساب", "Ledger")} ${(accs.data || []).find((a) => a.id === account)?.label || ""} ${from} - ${to}`} empty={t("اختر حساباً لعرض حركاته", "Choose an account to see its movements")}
                onRow={(r) => go(`/accounting/journals/${r.entry_id}`)} columns={[
           { key: "entry_date", label: t("التاريخ", "Date"), type: "date" },
           { key: "number", label: t("القيد", "Entry"), render: (r) => <span className="mono">{r.number}</span> },

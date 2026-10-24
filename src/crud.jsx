@@ -1,7 +1,7 @@
 // Config-driven list + form screen for master data (customers, vendors,
 // employees, items, accounts…). Screens with workflows (invoices, payroll…)
 // have their own components.
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { supabase, run } from "./supabase.js";
 import { useApp, useData, useAction, PageHead, Panel, Table, Modal, Field, Issues, useIssues } from "./ui.jsx";
 
@@ -76,6 +76,7 @@ export function RecordForm({ fields, value, onChange, lookups, invalid }) {
 export function Resource({ cfg }) {
   const { t, can } = useApp();
   const [edit, setEdit] = useState(null);     // record being edited (or {} for new)
+  const [importing, setImporting] = useState(false);
   const [q, setQ] = useState("");
   const [act, busy] = useAction();
   const v = useIssues();
@@ -127,8 +128,11 @@ export function Resource({ cfg }) {
     <>
       <PageHead title={cfg.title} sub={cfg.sub}>
         <input style={{ width: 220 }} placeholder={t("بحث…", "Search…")} value={q} onChange={(e) => setQ(e.target.value)} />
+        {canManage && cfg.importable !== false && <button className="btn" onClick={() => setImporting(true)}>⬆ {t("استيراد Excel", "Import Excel")}</button>}
         {canManage && <button className="btn primary" onClick={() => { v.clear(); setEdit({ ...(cfg.defaults || {}) }); }}>{t("+ جديد", "+ New")}</button>}
       </PageHead>
+      {importing && <ImportDialog cfg={cfg} lookups={lookups.data} existing={list.data || []}
+                                  onClose={() => setImporting(false)} onDone={() => { setImporting(false); list.reload(); }} />}
       <Panel pad={false}>
         <Table columns={cfg.columns} rows={rows} loading={list.loading}
                onRow={cfg.onRow || ((r) => { v.clear(); setEdit({ ...r }); })} />
@@ -151,5 +155,126 @@ export function Resource({ cfg }) {
         </Modal>
       )}
     </>
+  );
+}
+
+/**
+ * Excel import for a Resource: download a template built from the form
+ * fields, upload it, review a preview where every problem is listed in red
+ * with its row number, then insert all rows in one request (all or nothing).
+ */
+export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
+  const { t } = useApp();
+  const [act, busy] = useAction();
+  const v = useIssues();
+  const [result, setResult] = useState(null);   // { file, rows: [{ line, record, errors }] }
+  const fileRef = useRef(null);
+  const fields = cfg.fields.filter((f) => f.key && !f.section && !f.readOnly && f.import !== false);
+  // form defaults fill only optional, non-date fields: a missing hire date or nationality must be reported, not guessed
+  const defaults = Object.fromEntries(Object.entries(cfg.defaults || {}).filter(([k]) => {
+    const f = fields.find((x) => x.key === k);
+    return f && !f.required && f.type !== "date";
+  }));
+
+  async function template() {
+    const { downloadTemplate } = await import("./lib/excel.js");
+    await act(() => downloadTemplate({ name: `${cfg.title} - ${t("قالب الاستيراد", "import template")}`, entity: cfg.table, fields, lookups, t,
+                                       rtl: document.documentElement.dir !== "ltr" }).then(() => true));
+  }
+
+  async function read(file) {
+    v.clear(); setResult(null);
+    if (!file) return;
+    const { readWorkbook, convertRow } = await import("./lib/excel.js");
+    const ok = await act(async () => {
+      const wb = await readWorkbook(file, fields);
+      const problems = [];
+      if (wb.entity && wb.entity !== cfg.table) problems.push(t("هذا الملف قالب لقسم آخر. نزّل قالب هذه الشاشة واستخدمه.", "This file is a template for another screen. Download this screen's template."));
+      else if (!wb.mapped) problems.push(t("لم نتعرف على أعمدة الملف. استخدم القالب المنزّل من هذه الشاشة بدون تغيير صف العناوين.", "The file's columns were not recognised. Use the template from this screen without changing the header row."));
+      else if (!wb.rows.length) problems.push(t("الملف لا يحتوي على بيانات تحت صف العناوين.", "The file has no data under the header row."));
+      if (problems.length) { v.check(problems); return true; }
+      const codes = new Map();
+      const taken = new Set(existing.map((r) => String(r.code ?? "").trim().toLowerCase()).filter(Boolean));
+      const rows = wb.rows.map(({ line, cells }) => {
+        const { record, errors, failed } = convertRow(cells, fields, lookups, t);
+        const full = { ...defaults, ...record };
+        // a value that could not be read was already reported — don't also call it "required"
+        errors.push(...validateRecord(fields.filter((f) => !failed.has(f.key)), full, t).map((e) => e.msg));
+        if (cfg.validate) errors.push(...cfg.validate(full, t).map((e) => (typeof e === "string" ? e : e.msg)));
+        const code = String(full.code ?? "").trim().toLowerCase();
+        if (code) {
+          if (taken.has(code)) errors.push(t(`الرمز «${full.code}» موجود مسبقاً في النظام`, `Code "${full.code}" already exists`));
+          else if (codes.has(code)) errors.push(t(`الرمز «${full.code}» مكرر في الملف (سطر ${codes.get(code)})`, `Code "${full.code}" is repeated in the file (row ${codes.get(code)})`));
+          else codes.set(code, line);
+        }
+        return { line, record: full, errors: [...new Set(errors)] };
+      });
+      setResult({ file: file.name, rows });
+      return true;
+    });
+    if (!ok && fileRef.current) fileRef.current.value = "";
+  }
+
+  const bad = result?.rows.filter((r) => r.errors.length) || [];
+  const good = (result?.rows.length || 0) - bad.length;
+
+  async function commit() {
+    if (!result) { v.check([t("اختر ملف Excel أولاً", "Choose an Excel file first")]); return; }
+    if (!v.check(bad.slice(0, 200).flatMap((r) => r.errors.map((e) => t(`سطر ${r.line}: ${e}`, `Row ${r.line}: ${e}`))))) return;
+    const ok = await act(async () => {
+      // one request → one statement: either every row is saved or none is
+      await run(supabase.from(cfg.table).insert(result.rows.map((r) => r.record), { defaultToNull: false }));
+      return true;
+    }, t(`تم استيراد ${result.rows.length} سجل`, `Imported ${result.rows.length} records`));
+    if (ok) onDone();
+  }
+
+  const preview = fields.slice(0, 5);
+  const show = (f, r) => {
+    const x = r.record[f.key];
+    if (x === undefined || x === null) return "";
+    if (f.type === "select") { const opts = typeof f.options === "function" ? f.options(lookups || {}, r.record) : f.options || []; return opts.find((o) => o.id === x)?.label ?? x; }
+    if (f.type === "checkbox") return x ? t("نعم", "Yes") : t("لا", "No");
+    return String(x);
+  };
+
+  return (
+    <Modal title={`${t("استيراد من Excel", "Import from Excel")} — ${cfg.title}`} onClose={onClose} wide
+           footer={<>
+             <span style={{ flex: 1 }} />
+             <button className="btn" onClick={onClose}>{t("إلغاء", "Cancel")}</button>
+             <button className="btn primary" onClick={commit} disabled={busy}>
+               {result ? t(`تأكيد استيراد ${result.rows.length} سجل`, `Import ${result.rows.length} records`) : t("تأكيد الاستيراد", "Import")}</button>
+           </>}>
+      <ol className="steps">
+        <li>{t("نزّل القالب — الأعمدة المعلّمة بـ * إلزامية، والقوائم المنسدلة جاهزة.", "Download the template — columns marked * are required; dropdowns are ready.")}
+          {" "}<button className="btn sm" onClick={template} disabled={busy}>⬇ {t("تنزيل القالب", "Download template")}</button></li>
+        <li>{t("عبّئ البيانات (سطر لكل سجل) واحفظ الملف.", "Fill one row per record and save the file.")}</li>
+        <li>{t("ارفع الملف وراجع المعاينة. لن يُحفظ أي شيء حتى تكون كل الأسطر سليمة.", "Upload it and review the preview. Nothing is saved until every row is valid.")}
+          <div style={{ marginTop: 6 }}><input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                                               onChange={(e) => read(e.target.files?.[0])} /></div></li>
+      </ol>
+      <Issues issues={v.issues} title={result ? t("الرجاء تصحيح الأخطاء التالية في الملف ثم رفعه مرة أخرى:", "Please fix these rows in the file and upload it again:") : undefined} />
+      {result && (
+        <>
+          <div className={`alert ${bad.length ? "bad" : "ok"}`}>
+            {t(`${result.file}: ${result.rows.length} سطر — ${good} سليم`, `${result.file}: ${result.rows.length} rows — ${good} valid`)}
+            {bad.length > 0 && t(`، ${bad.length} فيه أخطاء (موضّحة بالأحمر)`, `, ${bad.length} with errors (in red)`)}
+          </div>
+          <div className="tbl-wrap" style={{ maxHeight: 360 }}>
+            <table className="tbl">
+              <thead><tr><th>{t("سطر", "Row")}</th>{preview.map((f) => <th key={f.key}>{f.label}</th>)}<th>{t("الحالة", "Status")}</th></tr></thead>
+              <tbody>{result.rows.slice(0, 300).map((r) => (
+                <tr key={r.line} className={r.errors.length ? "invalid" : ""}>
+                  <td className="mono">{r.line}</td>
+                  {preview.map((f) => <td key={f.key}>{show(f, r)}</td>)}
+                  <td>{r.errors.length ? <span className="neg">{r.errors.join(" · ")}</span> : "✓"}</td>
+                </tr>))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Modal>
   );
 }
