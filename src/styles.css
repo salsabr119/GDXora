@@ -246,3 +246,16 @@ tr.invalid input, tr.invalid select, input.invalid, select.invalid { border-colo
 .field .err { color: var(--bad); font-size: 11px; }
 .steps { margin: 0 0 12px; padding-inline-start: 20px; display: grid; gap: 8px; }
 tr.invalid td { background: #fff6f5; }
+
+/* ── reports ── */
+.grid.c3 { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.report-card { display: flex; flex-direction: column; gap: 6px; padding: 14px 16px; text-align: start; cursor: pointer; font: inherit; color: inherit; }
+.report-card:hover { border-color: var(--accent); }
+.report-card .muted { font-size: 13px; line-height: 1.5; }
+.print-only { display: none; }
+@media print {
+  .print-only { display: block; }
+  .report-print-head { margin-bottom: 12px; }
+  .report-print-head h2 { margin: 4px 0; }
+  .kpi { break-inside: avoid; }
+}

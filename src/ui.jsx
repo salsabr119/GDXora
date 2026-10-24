@@ -156,12 +156,12 @@ export function Modal({ title, onClose, children, footer, wide }) {
  * Table with typed columns.
  * columns: [{ key, label, type: 'money'|'date'|'num'|'badge', render(row), n }]
  */
-export function Table({ columns, rows, onRow, empty, footer, loading, exportName, exportable = true, ctx }) {
+export function Table({ columns, rows, onRow, empty, footer, loading, exportName, exportable = true, ctx, exportTotals }) {
   const { t } = useApp();
   const [act, busy] = useAction();
   if (loading && !rows) return <div className="empty">{t("جارِ التحميل…", "Loading…")}</div>;
   if (!rows || rows.length === 0) return <div className="empty">{empty || t("لا توجد بيانات بعد", "Nothing here yet")}</div>;
-  const onExport = () => act(() => exportTable({ columns, rows, t, name: exportName, ctx }));
+  const onExport = () => act(() => exportTable({ columns, rows: exportTotals ? [...rows, { ...exportTotals, __total: true }] : rows, t, name: exportName, ctx }));
   return (
     <>
       {exportable && <div className="tbl-tools"><button className="btn sm ghost" onClick={onExport} disabled={busy}>
@@ -212,6 +212,7 @@ async function exportTable({ columns, rows, t, name, ctx }) {
     label: typeof c.label === "string" ? c.label : nodeText(c.label, t) || c.key,
     type: c.type === "money" || c.type === "num" ? c.type : c.type === "date" ? "date" : c.n ? "num" : "text",
     value: (r) => {
+      if (r.__total) return r[c.key] ?? "";
       if (c.exportValue) return c.exportValue(r);
       if (!c.render) return c.type === "money" || c.type === "num" ? Number(r[c.key] || 0) : r[c.key];
       const v = nodeText(c.render(r, ctx), t);

@@ -57,7 +57,7 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.user?.id]);
 
-  const can = useCallback((p) => perms.has(p), [perms]);
+  const can = useCallback((p) => (Array.isArray(p) ? p.some((x) => perms.has(x)) : perms.has(p)), [perms]);
   const ctx = useMemo(() => ({
     lang, setLang, t, can, org, orgs, session, modules,
     notify: toasts.notify, notifyError: toasts.notifyError,
