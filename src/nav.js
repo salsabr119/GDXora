@@ -8,6 +8,7 @@ import * as F from "./screens/finance.jsx";
 import * as H from "./screens/hr.jsx";
 import * as Y from "./screens/payroll.jsx";
 import * as C from "./screens/settings.jsx";
+import * as R from "./screens/reports.jsx";
 
 export const NAV = [
   { group: ["الرئيسية", "Home"], items: [
@@ -45,6 +46,9 @@ export const NAV = [
   { group: ["الرواتب", "Payroll"], module: "payroll", items: [
     { path: "/payroll", label: ["مسيّرات الرواتب", "Payroll runs"], perm: "payroll.view", component: Y.PayrollRuns },
   ]},
+  { group: ["التقارير", "Reports"], items: [
+    { path: "/reports", label: ["📊 التقارير", "📊 Reports"], perm: R.REPORT_PERMS, component: R.ReportsHome },
+  ]},
   { group: ["الإعدادات", "Settings"], items: [
     { path: "/settings/company", label: ["بيانات الشركة", "Company"], perm: "settings.manage", component: C.Company },
     { path: "/settings/users", label: ["المستخدمون والصلاحيات", "Users & roles"], perm: "users.manage", component: C.Users },
@@ -55,6 +59,7 @@ export const NAV = [
 
 // detail routes (not in the sidebar)
 export const DETAIL_ROUTES = [
+  { path: "/reports/:key", perm: R.REPORT_PERMS, component: R.ReportView },
   { path: "/accounting/journals/:id", perm: "accounting.view", component: A.JournalEditor },
   { path: "/sales/invoices/:id", perm: "sales.view", component: S.InvoiceEditor },
   { path: "/projects/:id", perm: "projects.view", component: P.ProjectDetail },
