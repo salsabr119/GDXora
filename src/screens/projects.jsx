@@ -23,8 +23,74 @@ const projectFields = (t) => [
   { key: "retention_pct", label: t("نسبة محتجزات الضمان %", "Retention %"), type: "number", validate: (v) => (Number(v) < 0 || Number(v) > 100 ? t("النسبة بين 0 و 100", "Percentage must be between 0 and 100") : null) },
   { key: "advance_amount", label: t("الدفعة المقدمة", "Advance payment"), type: "money", validate: (v) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative") : null) },
   { key: "advance_recovery_pct", label: t("نسبة استرداد الدفعة من كل مستخلص %", "Advance recovery per billing %"), type: "number", validate: (v) => (Number(v) < 0 || Number(v) > 100 ? t("النسبة بين 0 و 100", "Percentage must be between 0 and 100") : null) },
+  { section: t("مشروع قائم قبل النظام (اختياري)", "Project already under way (optional)") },
+  { key: "opening_billing_count", label: t("عدد المستخلصات الصادرة قبل النظام", "Billings issued before the system"), type: "number",
+    hint: t("المستخلص القادم يأخذ الرقم التالي", "The next billing takes the following number"),
+    validate: (v) => (Number(v) < 0 || !Number.isInteger(Number(v)) ? t("عدد صحيح موجب", "A whole number, zero or more") : null) },
+  { key: "opening_advance_recovered", label: t("الدفعة المقدمة المستردة سابقاً", "Advance already recovered"), type: "money",
+    validate: (v, r) => (Number(v) < 0 ? t("القيمة لا تكون سالبة", "Value cannot be negative")
+      : Number(v) > Number(r.advance_amount || 0) ? t("أكبر من الدفعة المقدمة", "Exceeds the advance payment") : null) },
   { key: "notes", label: t("ملاحظات", "Notes"), type: "textarea", wide: true },
 ];
+
+/** Import one project (contract, BOQ, optional new customer) from the Excel template. */
+function ProjectImportDialog({ lookups, existing, onClose }) {
+  const { t } = useApp();
+  const [act, busy] = useAction();
+  const v = useIssues();
+  const [res, setRes] = useState(null);
+  async function read(file) {
+    v.clear(); setRes(null);
+    if (!file) return;
+    await act(async () => {
+      const { parseProjectWorkbook } = await import("../lib/projectImport.js");
+      const r = await parseProjectWorkbook(await file.arrayBuffer(), { customers: lookups?.customers || [], projects: existing, t });
+      setRes({ ...r, file: file.name });
+      v.check(r.errors);
+      return true;
+    });
+  }
+  async function commit() {
+    if (!res) { v.check([t("اختر ملف المشروع أولاً", "Choose the project file first")]); return; }
+    if (!v.check(res.errors)) return;
+    const id = await act(() => rpc("import_project", { p: res.payload }), t("تم رفع المشروع", "Project imported"));
+    if (id) { onClose(); go(`/projects/${id}`); }
+  }
+  const s = res?.summary;
+  return (
+    <Modal title={t("رفع مشروع من Excel", "Import a project from Excel")} onClose={onClose} wide
+           footer={<><span style={{ flex: 1 }} /><button className="btn" onClick={onClose}>{t("إلغاء", "Cancel")}</button>
+             <button className="btn primary" onClick={commit} disabled={busy}>{t("تأكيد رفع المشروع", "Import project")}</button></>}>
+      <ol className="steps">
+        <li>{t("نزّل القالب وعبّئ ورقة «المشروع» و«جدول الكميات» (و«العميل» إذا كان جديداً).", "Download the template and fill the project and BOQ sheets (and the customer sheet for a new customer).")}
+          {" "}<a className="btn sm" href="/templates/project-import.xlsx" download="قالب رفع مشروع.xlsx">⬇ {t("تنزيل القالب", "Download template")}</a></li>
+        <li>{t("للمشاريع القائمة: عبّئ الكميات المفوترة سابقاً وعدد المستخلصات السابقة، ليبدأ المستخلص القادم من حيث توقفتم.", "For running projects: fill the previously billed quantities and the number of previous billings so the next billing continues from there.")}</li>
+        <li>{t("ارفع الملف وراجع الملخص. لا يُحفظ شيء حتى تكون البيانات سليمة.", "Upload the file and review the summary. Nothing is saved until the data is valid.")}
+          <div style={{ marginTop: 6 }}><input type="file" accept=".xlsx" onChange={(e) => read(e.target.files?.[0])} /></div></li>
+      </ol>
+      <Issues issues={v.issues} title={res ? t("الرجاء تصحيح ما يلي في الملف ثم رفعه مرة أخرى:", "Please fix the following in the file and upload it again:") : undefined} />
+      {res?.warnings?.length > 0 && <div className="alert warn"><b>{t("تنبيه (لا يمنع الرفع):", "Note (does not block the import):")}</b><ul>{res.warnings.map((w, i) => <li key={i}>{w}</li>)}</ul></div>}
+      {s && (
+        <>
+          <div className="grid k4" style={{ marginBottom: 12 }}>
+            <div className="panel kpi"><div className="l">{t("المشروع", "Project")}</div><div className="v" style={{ fontSize: 16 }}>{s.name || "—"}</div></div>
+            <div className="panel kpi"><div className="l">{t("العميل", "Customer")}</div><div className="v" style={{ fontSize: 16 }}>{s.customer || "—"}</div>
+              {s.newCustomer && <div className="s">{t("عميل جديد — سيُضاف", "New customer — will be added")}</div>}</div>
+            <div className="panel kpi"><div className="l">{t("بنود جدول الكميات", "BOQ items")}</div><div className="v">{s.items}</div></div>
+            <div className="panel kpi"><div className="l">{t("إجمالي جدول الكميات", "BOQ total")}</div><div className="v"><Money v={s.total} /></div>
+              {s.billed > 0 && <div className="s">{t("مفوتر سابقاً", "Billed before")}: {num(s.billed)}</div>}</div>
+          </div>
+          {s.previewBoq.length > 0 && <div className="tbl-wrap" style={{ maxHeight: 300 }}><table className="tbl">
+            <thead><tr><th>{t("البند", "Item")}</th><th>{t("الوصف", "Description")}</th><th>{t("الوحدة", "Unit")}</th>
+              <th className="n">{t("الكمية", "Qty")}</th><th className="n">{t("سعر الوحدة", "Rate")}</th><th className="n">{t("مفوتر سابقاً", "Billed before")}</th></tr></thead>
+            <tbody>{s.previewBoq.map((b) => <tr key={b.line}><td>{b.item_no}</td><td>{b.description}</td><td>{b.unit}</td>
+              <td className="n">{b.quantity}</td><td className="n">{num(b.unit_price)}</td><td className="n">{b.opening_billed_qty || "—"}</td></tr>)}</tbody>
+          </table></div>}
+        </>
+      )}
+    </Modal>
+  );
+}
 
 export function Projects() {
   const { t } = useApp();
@@ -32,7 +98,7 @@ export function Projects() {
     table: "projects", title: t("المشاريع والعقود", "Projects & contracts"),
     sub: t("كل الإيرادات والتكاليف (فواتير، موردين، رواتب) تُحمّل على المشروع لتظهر ربحيته مباشرة", "Revenue and costs (invoices, bills, payroll) are tagged to projects for live profitability"),
     select: "*, customers(name_ar)", order: "created_at.desc", managePerm: "projects.manage",
-    search: ["code", "name_ar", "contract_no"], onRow: (r) => go(`/projects/${r.id}`),
+    search: ["code", "name_ar", "contract_no"], onRow: (r) => go(`/projects/${r.id}`), importer: ProjectImportDialog,
     loadLookups: async () => ({ customers: await L.customers() }),
     defaults: { status: "active", contract_value: 0, retention_pct: 10, advance_amount: 0, advance_recovery_pct: 0 },
     columns: [
@@ -76,13 +142,16 @@ export function ProjectDetail({ params }) {
   async function saveProject(e) {
     e.preventDefault();
     if (!iss.check(validateRecord(projectFields(t), edit, t))) return;
-    const rec = {}; for (const f of projectFields(t)) if (f.key) rec[f.key] = edit[f.key] ?? null;
+    const rec = {}; for (const f of projectFields(t)) if (f.key) rec[f.key] = edit[f.key] ?? (f.type === "money" || f.type === "number" ? 0 : null);
     if (await act(async () => { await run(supabase.from("projects").update(rec).eq("id", p.id)); return true; }, t("تم الحفظ", "Saved"))) { setEdit(null); d.reload(); }
   }
   const boqFields = [
           { key: "item_no", label: t("رقم البند", "Item no.") }, { key: "description", label: t("الوصف", "Description"), required: true, wide: true },
           { key: "unit", label: t("الوحدة", "Unit") }, { key: "quantity", label: t("الكمية التعاقدية", "Contract qty"), type: "number", required: true },
-          { key: "unit_price", label: t("سعر الوحدة", "Rate"), type: "money", required: true }, { key: "sort", label: t("الترتيب", "Order"), type: "number" }];
+          { key: "unit_price", label: t("سعر الوحدة", "Rate"), type: "money", required: true }, { key: "sort", label: t("الترتيب", "Order"), type: "number" },
+          { key: "opening_billed_qty", label: t("الكمية المفوترة قبل النظام", "Qty billed before the system"), type: "number",
+            hint: t("للمشاريع القائمة فقط — المستخلص القادم يبدأ منها", "Running projects only — the next billing starts from it"),
+            validate: (v, r) => (Number(v) < 0 ? t("لا تكون سالبة", "Cannot be negative") : Number(v) > Number(r.quantity || 0) ? t("أكبر من الكمية التعاقدية", "Exceeds the contract quantity") : null) }];
   async function saveBoq(e) {
     e.preventDefault();
     const out = validateRecord(boqFields, boqEdit, t);
@@ -90,7 +159,8 @@ export function ProjectDetail({ params }) {
     if (Number(boqEdit.unit_price) < 0) out.push({ key: "unit_price", msg: t("السعر لا يكون سالباً", "Rate cannot be negative") });
     if (!iss.check(out)) return;
     const rec = { project_id: p.id, item_no: boqEdit.item_no || null, description: boqEdit.description, unit: boqEdit.unit || null,
-                  quantity: Number(boqEdit.quantity || 0), unit_price: Number(boqEdit.unit_price || 0), sort: Number(boqEdit.sort || 0) };
+                  quantity: Number(boqEdit.quantity || 0), unit_price: Number(boqEdit.unit_price || 0), sort: Number(boqEdit.sort || 0),
+                  opening_billed_qty: Number(boqEdit.opening_billed_qty || 0) };
     const ok = await act(async () => {
       if (boqEdit.id) await run(supabase.from("project_boq_items").update(rec).eq("id", boqEdit.id));
       else await run(supabase.from("project_boq_items").insert(rec));
@@ -138,7 +208,8 @@ export function ProjectDetail({ params }) {
                empty={t("أضف بنود العقد لتتمكن من إعداد المستخلصات", "Add contract items to prepare progress billings")} columns={[
           { key: "item_no", label: t("البند", "Item") }, { key: "description", label: t("الوصف", "Description") }, { key: "unit", label: t("الوحدة", "Unit") },
           { key: "quantity", label: t("الكمية", "Qty"), type: "num" }, { key: "unit_price", label: t("سعر الوحدة", "Rate"), type: "money" },
-          { key: "amount", label: t("القيمة", "Amount"), type: "money" }]}
+          { key: "amount", label: t("القيمة", "Amount"), type: "money" },
+          ...(boq.some((b) => Number(b.opening_billed_qty)) ? [{ key: "opening_billed_qty", label: t("مفوتر قبل النظام", "Billed before"), type: "num" }] : [])]}
           footer={<><td colSpan={5}>{t("الإجمالي", "Total")}</td><td className="n"><Money v={boqTotal} currency={null} /></td></>} />
       </Panel>}
 

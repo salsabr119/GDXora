@@ -131,8 +131,11 @@ export function Resource({ cfg }) {
         {canManage && cfg.importable !== false && <button className="btn" onClick={() => setImporting(true)}>⬆ {t("استيراد Excel", "Import Excel")}</button>}
         {canManage && <button className="btn primary" onClick={() => { v.clear(); setEdit({ ...(cfg.defaults || {}) }); }}>{t("+ جديد", "+ New")}</button>}
       </PageHead>
-      {importing && <ImportDialog cfg={cfg} lookups={lookups.data} existing={list.data || []}
-                                  onClose={() => setImporting(false)} onDone={() => { setImporting(false); list.reload(); }} />}
+      {importing && (() => {
+        const Dialog = cfg.importer || ImportDialog;
+        return <Dialog cfg={cfg} lookups={lookups.data} existing={list.data || []}
+                       onClose={() => setImporting(false)} onDone={() => { setImporting(false); list.reload(); }} />;
+      })()}
       <Panel pad={false}>
         <Table columns={cfg.columns} rows={rows} loading={list.loading}
                onRow={cfg.onRow || ((r) => { v.clear(); setEdit({ ...r }); })} />
