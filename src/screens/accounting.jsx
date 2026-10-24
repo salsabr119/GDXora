@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, go, useName, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Modal, go, useName, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
-import { today, downloadCsv, num } from "../lib/format.js";
+import { today, num } from "../lib/format.js";
 
 const TYPES = (t) => [
   { id: "asset", label: t("أصول", "Asset") }, { id: "liability", label: t("التزامات", "Liability") },
@@ -47,8 +47,125 @@ export function Accounts() {
 }
 
 /* ── journal list ────────────────────────────────────────────────────── */
+// which kind of party an account's lines refer to
+const PARTY_BY_KEY = { ar: "customer", retention_receivable: "customer", customer_advances: "customer",
+                       ap: "vendor", retention_payable: "vendor", employee_advances: "employee", salaries_payable: "employee" };
+
+/** Opening balances from Excel → a draft journal entry the accountant reviews and posts. */
+function OpeningImportDialog({ onClose }) {
+  const { t } = useApp();
+  const [act, busy] = useAction();
+  const v = useIssues();
+  const [date, setDate] = useState(today().slice(0, 4) + "-01-01");
+  const [res, setRes] = useState(null);
+  const lk = useData(async () => {
+    const [accounts, projects, customers, vendors, employees] = await Promise.all([L.accounts(), L.projects(), L.customers(), L.vendors(), L.employees()]);
+    return { accounts, projects, parties: { customer: customers, vendor: vendors, employee: employees } };
+  }, []);
+  const fields = [
+    { key: "account_id", label: t("الحساب", "Account"), type: "select", required: true, options: (x) => x.accounts || [],
+      hint: t("اختر من القائمة أو اكتب رمز الحساب", "Pick from the list or type the account code") },
+    { key: "debit", label: t("مدين", "Debit"), type: "money" },
+    { key: "credit", label: t("دائن", "Credit"), type: "money" },
+    { key: "description", label: t("البيان", "Description") },
+    { key: "party", label: t("الطرف (عميل / مورد / موظف)", "Party (customer / vendor / employee)"),
+      hint: t("لحسابات العملاء والموردين وسلف الموظفين: الاسم أو الرمز", "For receivable, payable and advance accounts: name or code") },
+    { key: "project_id", label: t("المشروع", "Project"), type: "select", options: (x) => x.projects || [] },
+  ];
+  const partyName = { customer: t("عميل", "customer"), vendor: t("مورد", "vendor"), employee: t("موظف", "employee") };
+  const partyList = { customer: t("العملاء", "customers"), vendor: t("الموردين", "vendors"), employee: t("الموظفين", "employees") };
+
+  async function template() {
+    const { downloadTemplate } = await import("../lib/excel.js");
+    await act(() => downloadTemplate({ name: t("قالب الأرصدة الافتتاحية", "Opening balances template"), entity: "opening_balances",
+                                       fields, lookups: lk.data, t, rtl: document.documentElement.dir !== "ltr" }).then(() => true));
+  }
+
+  async function read(file) {
+    v.clear(); setRes(null);
+    if (!file || !lk.data) return;
+    await act(async () => {
+      const { readWorkbook, convertRow, matchOption } = await import("../lib/excel.js");
+      const wb = await readWorkbook(file, fields);
+      if (wb.entity && wb.entity !== "opening_balances") { v.check([t("هذا الملف قالب لقسم آخر. نزّل قالب الأرصدة الافتتاحية.", "This file is a template for another screen.")]); return true; }
+      if (!wb.rows.length) { v.check([t("الملف لا يحتوي على أسطر.", "The file has no rows.")]); return true; }
+      const errors = []; const lines = [];
+      for (const { line, cells } of wb.rows) {
+        const { record, errors: e, failed } = convertRow(cells, fields, lk.data, t);
+        const where = t(`سطر ${line}`, `Row ${line}`);
+        e.forEach((m) => errors.push(`${where}: ${m}`));
+        if (!record.account_id && !failed.has("account_id")) errors.push(t(`${where}: اختر الحساب`, `${where}: choose the account`));
+        const d = record.debit || 0, c = record.credit || 0;
+        if (d < 0 || c < 0) errors.push(t(`${where}: المبالغ لا تكون سالبة`, `${where}: amounts cannot be negative`));
+        if (d > 0 && c > 0) errors.push(t(`${where}: اكتب المبلغ في المدين أو الدائن، وليس الاثنين`, `${where}: use either debit or credit`));
+        if (!d && !c && !failed.has("debit") && !failed.has("credit")) errors.push(t(`${where}: أدخل مبلغاً في المدين أو الدائن`, `${where}: enter a debit or credit`));
+        const acc = lk.data.accounts.find((a) => a.id === record.account_id);
+        let party_type = null, party_id = null, partyLabel = null;
+        if (record.party) {
+          const want = acc && PARTY_BY_KEY[acc.system_key];
+          const hits = (want ? [want] : ["customer", "vendor", "employee"])
+            .map((k) => [k, matchOption(lk.data.parties[k], record.party)]).filter(([, o]) => o);
+          if (!hits.length) errors.push(t(`${where}: الطرف «${record.party}» غير موجود${want ? ` ضمن ${partyList[want]}` : ""} — أضفه أولاً أو اكتب رمزه`, `${where}: party "${record.party}" not found — add it first or use its code`));
+          else if (hits.length > 1) errors.push(t(`${where}: «${record.party}» موجود كعميل ومورد/موظف — اكتب الرمز بدل الاسم`, `${where}: "${record.party}" matches several parties — use the code`));
+          else [[party_type, { id: party_id, label: partyLabel }]] = hits;
+        } else if (acc && PARTY_BY_KEY[acc.system_key]) {
+          errors.push(t(`${where}: حساب «${acc.name_ar}» يحتاج تحديد ${partyName[PARTY_BY_KEY[acc.system_key]]} في عمود «الطرف»`, `${where}: account "${acc.name_ar}" needs the ${PARTY_BY_KEY[acc.system_key]} in the party column`));
+        }
+        lines.push({ line, acc, debit: d, credit: c, description: record.description || null, project_id: record.project_id || null, party_type, party_id, partyLabel });
+      }
+      const dr = lines.reduce((n, l) => n + l.debit, 0), cr = lines.reduce((n, l) => n + l.credit, 0);
+      if (Math.abs(dr - cr) >= 0.005) errors.push(t(`الأرصدة غير متوازنة: المدين ${num(dr)} والدائن ${num(cr)} — الفرق ${num(Math.abs(dr - cr))}`, `Not balanced: debit ${num(dr)} vs credit ${num(cr)} — difference ${num(Math.abs(dr - cr))}`));
+      setRes({ file: file.name, lines, dr, cr, errors });
+      v.check(errors.slice(0, 200));
+      return true;
+    });
+  }
+
+  async function commit() {
+    if (!res) { v.check([t("اختر ملف الأرصدة أولاً", "Choose the balances file first")]); return; }
+    if (!date) { v.check([t("أدخل تاريخ الأرصدة الافتتاحية", "Enter the opening balances date")]); return; }
+    if (!v.check(res.errors.slice(0, 200))) return;
+    const id = await act(() => rpc("create_journal", {
+      p_date: date, p_memo: t("الأرصدة الافتتاحية", "Opening balances"), p_post: false, p_source: "opening",
+      p_lines: res.lines.map((l) => ({ account_id: l.acc.id, debit: l.debit, credit: l.credit, description: l.description,
+                                       project_id: l.project_id, party_type: l.party_type, party_id: l.party_id })) }),
+      t("تم إنشاء قيد الأرصدة الافتتاحية كمسودة — راجعه ثم رحّله", "Opening entry created as a draft — review and post it"));
+    if (id) { onClose(); go(`/accounting/journals/${id}`); }
+  }
+
+  return (
+    <Modal title={t("استيراد الأرصدة الافتتاحية من Excel", "Import opening balances from Excel")} onClose={onClose} wide
+           footer={<><span style={{ flex: 1 }} /><button className="btn" onClick={onClose}>{t("إلغاء", "Cancel")}</button>
+             <button className="btn primary" onClick={commit} disabled={busy}>{t("إنشاء قيد الأرصدة (مسودة)", "Create opening entry (draft)")}</button></>}>
+      <ol className="steps">
+        <li>{t("نزّل القالب: سطر لكل رصيد — الحساب، والمبلغ في المدين أو الدائن.", "Download the template: one row per balance — account and the amount as debit or credit.")}
+          {" "}<button className="btn sm" onClick={template} disabled={busy || !lk.data}>⬇ {t("تنزيل القالب", "Download template")}</button></li>
+        <li>{t("أرصدة العملاء والموردين وسلف الموظفين: سطر لكل طرف مع اسمه أو رمزه في عمود «الطرف». الفرق يُقفل على حساب رأس المال أو الأرباح المبقاة.", "Customer, vendor and employee-advance balances: one row per party with its name or code. Close the difference to capital or retained earnings.")}</li>
+        <li>{t("ارفع الملف. يُنشأ قيد مسودة بتاريخ الأرصدة تراجعه ثم ترحّله.", "Upload the file. A draft entry is created on the opening date for you to review and post.")}
+          <div className="row" style={{ marginTop: 6, gap: 12, flexWrap: "wrap" }}>
+            <Field label={t("تاريخ الأرصدة الافتتاحية", "Opening balances date")} required><input type="date" value={date} onChange={(e) => setDate(e.target.value)} /></Field>
+            <input type="file" accept=".xlsx" onChange={(e) => read(e.target.files?.[0])} /></div></li>
+      </ol>
+      <Issues issues={v.issues} title={res ? t("الرجاء تصحيح ما يلي في الملف ثم رفعه مرة أخرى:", "Please fix the following in the file and upload it again:") : undefined} />
+      {res && (
+        <>
+          <div className={`alert ${res.errors.length ? "bad" : "ok"}`}>
+            {t(`${res.file}: ${res.lines.length} سطر — مدين ${num(res.dr)} / دائن ${num(res.cr)}`, `${res.file}: ${res.lines.length} rows — debit ${num(res.dr)} / credit ${num(res.cr)}`)}
+          </div>
+          <div className="tbl-wrap" style={{ maxHeight: 320 }}><table className="tbl">
+            <thead><tr><th>{t("سطر", "Row")}</th><th>{t("الحساب", "Account")}</th><th>{t("الطرف", "Party")}</th><th className="n">{t("مدين", "Debit")}</th><th className="n">{t("دائن", "Credit")}</th></tr></thead>
+            <tbody>{res.lines.slice(0, 300).map((l) => <tr key={l.line}><td className="mono">{l.line}</td><td>{l.acc?.label || "—"}</td><td>{l.partyLabel || ""}</td>
+              <td className="n">{l.debit ? num(l.debit) : ""}</td><td className="n">{l.credit ? num(l.credit) : ""}</td></tr>)}</tbody>
+          </table></div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
 export function Journals() {
   const { t, can } = useApp();
+  const [opening, setOpening] = useState(false);
   const [status, setStatus] = useState("");
   const list = useData(() => {
     let q = supabase.from("journal_entries").select("id, number, entry_date, memo, source_type, status, total").order("entry_date", { ascending: false }).order("created_at", { ascending: false }).limit(500);
@@ -56,7 +173,7 @@ export function Journals() {
     return run(q);
   }, [status]);
   const src = { manual: t("يدوي", "Manual"), invoice: t("فاتورة", "Invoice"), bill: t("فاتورة مورد", "Bill"),
-                payment: t("سند", "Voucher"), payroll: t("رواتب", "Payroll"), reversal: t("عكس", "Reversal") };
+                payment: t("سند", "Voucher"), payroll: t("رواتب", "Payroll"), reversal: t("عكس", "Reversal"), opening: t("أرصدة افتتاحية", "Opening balances") };
   return (
     <>
       <PageHead title={t("القيود اليومية", "Journal entries")} sub={t("القيود الآلية تُنشأ من الفواتير والسندات والرواتب", "Automatic entries come from invoices, vouchers and payroll")}>
@@ -64,8 +181,10 @@ export function Journals() {
           <option value="">{t("كل الحالات", "All statuses")}</option>
           <option value="draft">{t("مسودة", "Draft")}</option><option value="posted">{t("مُرحّل", "Posted")}</option><option value="reversed">{t("معكوس", "Reversed")}</option>
         </select>
+        {can("accounting.manage") && <button className="btn" onClick={() => setOpening(true)}>⬆ {t("استيراد الأرصدة الافتتاحية", "Import opening balances")}</button>}
         {can("accounting.manage") && <button className="btn primary" onClick={() => go("/accounting/journals/new")}>{t("+ قيد يدوي", "+ Manual entry")}</button>}
       </PageHead>
+      {opening && <OpeningImportDialog onClose={() => setOpening(false)} />}
       <Panel pad={false}>
         <Table rows={list.data} loading={list.loading} onRow={(r) => go(`/accounting/journals/${r.id}`)} columns={[
           { key: "number", label: t("الرقم", "No."), render: (r) => <span className="mono">{r.number || "—"}</span> },
@@ -107,7 +226,8 @@ export function JournalEditor({ params }) {
 
   const setLine = (i, patch) => setForm({ ...form, lines: lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) });
   const payload = () => lines.filter((l) => l.account_id && (Number(l.debit) || Number(l.credit)))
-    .map((l) => ({ account_id: l.account_id, description: l.description || null, debit: Number(l.debit || 0), credit: Number(l.credit || 0), project_id: l.project_id || null }));
+    .map((l) => ({ account_id: l.account_id, description: l.description || null, debit: Number(l.debit || 0), credit: Number(l.credit || 0), project_id: l.project_id || null,
+                   party_type: l.party_type || null, party_id: l.party_id || null }));
 
   // what is missing before saving / posting — shown in red above the form
   function problems(post) {
@@ -249,12 +369,10 @@ export function TrialBalance() {
   return (
     <>
       <PageHead title={t("ميزان المراجعة", "Trial balance")} sub={t("الرصيد الموجب مدين والسالب دائن", "Positive = debit, negative = credit")}>
-        <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo}>
-          <button className="btn" onClick={() => downloadCsv(`trial-balance-${to}.csv`, rows, cols.map((c) => ({ key: c.key, label: c.label })))}>{t("تصدير Excel", "Export")}</button>
-        </DateRange>
+        <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} />
       </PageHead>
       <Panel pad={false}>
-        <Table rows={rows} loading={tb.loading} columns={cols} footer={<>
+        <Table rows={rows} loading={tb.loading} columns={cols} exportName={`${t("ميزان المراجعة", "Trial balance")} ${from || ""} - ${to || ""}`} footer={<>
           <td colSpan={2}>{t("الإجمالي", "Total")}</td>
           <td className="n"><Money v={sum("opening")} currency={null} /></td>
           <td className="n"><Money v={sum("debit")} currency={null} /></td>
@@ -286,6 +404,28 @@ export function Statements() {
   const assets = bs("asset", 1), liabilities = bs("liability", -1), equity = bs("equity", -1);
   const sum = (a) => a.reduce((n, r) => n + r.amt, 0);
 
+  async function exportStatements() {
+    const { exportXlsx } = await import("../lib/excel.js");
+    const out = [];
+    const block = (title, rows, total, extra = []) => {
+      out.push({ a: title, b: null });
+      rows.forEach((r) => out.push({ a: `${r.code} — ${r.name_ar}`, b: r.amt }));
+      extra.forEach((x) => out.push(x));
+      out.push({ a: `${t("إجمالي", "Total")} ${title}`, b: total });
+    };
+    out.push({ a: t(`قائمة الدخل من ${from} إلى ${to}`, `Income statement ${from} – ${to}`), b: null });
+    block(t("الإيرادات", "Revenue"), revenue, totRev);
+    block(t("التكاليف والمصروفات", "Costs & expenses"), expense, totExp);
+    out.push({ a: t("صافي الربح (الخسارة)", "Net profit (loss)"), b: totRev - totExp }, { a: "", b: null });
+    out.push({ a: `${t("قائمة المركز المالي في", "Balance sheet at")} ${to}`, b: null });
+    block(t("الأصول", "Assets"), assets, sum(assets));
+    block(t("الالتزامات", "Liabilities"), liabilities, sum(liabilities));
+    block(t("حقوق الملكية", "Equity"), equity, sum(equity) + profitToDate, [{ a: t("أرباح (خسائر) غير مقفلة", "Unclosed profit (loss)"), b: profitToDate }]);
+    out.push({ a: t("الالتزامات + حقوق الملكية", "Liabilities + equity"), b: sum(liabilities) + sum(equity) + profitToDate });
+    await exportXlsx({ filename: `${t("القوائم المالية", "Financial statements")} ${to}`, sheet: t("القوائم المالية", "Statements"),
+                       columns: [{ label: t("البند", "Line"), value: (r) => r.a }, { label: t("المبلغ", "Amount"), type: "money", value: (r) => r.b }], rows: out });
+  }
+
   const Block = ({ title, rows, total, extra }) => (
     <>
       <tr><td colSpan={2} style={{ fontWeight: 700, color: "var(--brand)" }}>{title}</td></tr>
@@ -297,7 +437,10 @@ export function Statements() {
 
   return (
     <>
-      <PageHead title={t("القوائم المالية", "Financial statements")}><DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} /></PageHead>
+      <PageHead title={t("القوائم المالية", "Financial statements")}>
+        <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} />
+        <button className="btn" onClick={exportStatements} disabled={!d.data}>⬇ {t("تصدير Excel", "Export to Excel")}</button>
+      </PageHead>
       <div className="grid c2">
         <Panel title={t("قائمة الدخل", "Income statement")} pad={false}>
           <table className="tbl"><tbody>
@@ -338,7 +481,7 @@ export function Ledger() {
         <DateRange from={from} to={to} setFrom={setFrom} setTo={setTo} />
       </PageHead>
       <Panel pad={false}>
-        <Table rows={led.data} loading={led.loading} empty={t("اختر حساباً لعرض حركاته", "Choose an account to see its movements")}
+        <Table rows={led.data} loading={led.loading} exportName={`${t("كشف حساب", "Ledger")} ${(accs.data || []).find((a) => a.id === account)?.label || ""} ${from} - ${to}`} empty={t("اختر حساباً لعرض حركاته", "Choose an account to see its movements")}
                onRow={(r) => go(`/accounting/journals/${r.entry_id}`)} columns={[
           { key: "entry_date", label: t("التاريخ", "Date"), type: "date" },
           { key: "number", label: t("القيد", "Entry"), render: (r) => <span className="mono">{r.number}</span> },

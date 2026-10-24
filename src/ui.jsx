@@ -156,12 +156,17 @@ export function Modal({ title, onClose, children, footer, wide }) {
  * Table with typed columns.
  * columns: [{ key, label, type: 'money'|'date'|'num'|'badge', render(row), n }]
  */
-export function Table({ columns, rows, onRow, empty, footer, loading }) {
+export function Table({ columns, rows, onRow, empty, footer, loading, exportName, exportable = true }) {
   const { t } = useApp();
+  const [act, busy] = useAction();
   if (loading && !rows) return <div className="empty">{t("جارِ التحميل…", "Loading…")}</div>;
   if (!rows || rows.length === 0) return <div className="empty">{empty || t("لا توجد بيانات بعد", "Nothing here yet")}</div>;
+  const onExport = () => act(() => exportTable({ columns, rows, t, name: exportName }));
   return (
-    <div className="tbl-wrap">
+    <>
+      {exportable && <div className="tbl-tools"><button className="btn sm ghost" onClick={onExport} disabled={busy}>
+        ⬇ {t("تصدير Excel", "Export to Excel")}</button></div>}
+      <div className="tbl-wrap">
       <table className="tbl">
         <thead><tr>{columns.map((c) => <th key={c.key || c.label} className={c.type === "money" || c.type === "num" || c.n ? "n" : ""}>{c.label}</th>)}</tr></thead>
         <tbody>
@@ -180,8 +185,43 @@ export function Table({ columns, rows, onRow, empty, footer, loading }) {
         </tbody>
         {footer && <tfoot><tr>{footer}</tr></tfoot>}
       </table>
-    </div>
+      </div>
+    </>
   );
+}
+
+/** Plain value of a rendered cell, for export: numbers stay numbers, badges become their label. */
+export function nodeText(node, t) {
+  if (node === null || node === undefined || node === false || node === true) return "";
+  if (typeof node === "string" || typeof node === "number") return node;
+  if (Array.isArray(node)) {
+    const parts = node.map((n) => nodeText(n, t)).filter((x) => x !== "");
+    return parts.length === 1 ? parts[0] : parts.join(" ");
+  }
+  if (node.type === Money) return Number(node.props.v || 0);
+  if (node.type === DateText) return node.props.v ? String(node.props.v).slice(0, 10) : "";
+  if (node.type === StatusBadge) return statusLabel(node.props.status, t);
+  if (typeof node.type === "function" && !node.props?.children) return "";   // e.g. buttons rendered by components
+  return nodeText(node.props?.children, t);
+}
+
+async function exportTable({ columns, rows, t, name }) {
+  const { exportXlsx } = await import("./lib/excel.js");
+  const title = name || document.querySelector(".page-head h1")?.textContent || "export";
+  const cols = columns.filter((c) => c.label && c.export !== false).map((c) => ({
+    label: typeof c.label === "string" ? c.label : nodeText(c.label, t) || c.key,
+    type: c.type === "money" || c.type === "num" ? c.type : c.type === "date" ? "date" : c.n ? "num" : "text",
+    value: (r) => {
+      if (c.exportValue) return c.exportValue(r);
+      if (!c.render) return c.type === "money" || c.type === "num" ? Number(r[c.key] || 0) : r[c.key];
+      const v = nodeText(c.render(r), t);
+      return v === "—" ? "" : v;
+    },
+  }));
+  const stamp = new Date().toISOString().slice(0, 10);
+  await exportXlsx({ filename: `${title} ${stamp}`, sheet: title, title: `${title} — ${stamp}`, columns: cols, rows,
+                     rtl: document.documentElement.dir !== "ltr" });
+  return true;
 }
 
 /** loading placeholder; after a while offers a retry (a failed load also shows an error toast) */
@@ -246,9 +286,7 @@ export class ErrorBoundary extends Component {
 }
 
 /** status → badge */
-export function StatusBadge({ status }) {
-  const { t } = useApp();
-  const map = {
+const statusMap = (t) => ({
     draft: ["", t("مسودة", "Draft")], posted: ["ok", t("مُرحّل", "Posted")], issued: ["ok", t("مُصدرة", "Issued")],
     reversed: ["warn", t("معكوس", "Reversed")], approved: ["info", t("معتمد", "Approved")],
     pending: ["warn", t("قيد الانتظار", "Pending")], rejected: ["bad", t("مرفوض", "Rejected")],
@@ -259,8 +297,11 @@ export function StatusBadge({ status }) {
     paid: ["ok", t("مدفوعة", "Paid")], partial: ["warn", t("مدفوعة جزئياً", "Partially paid")], unpaid: ["", t("غير مدفوعة", "Unpaid")],
     not_submitted: ["", t("لم تُرسل", "Not submitted")], reported: ["ok", t("مُبلّغ عنها", "Reported")],
     cleared: ["ok", t("معتمدة", "Cleared")], warning: ["warn", t("تحذير", "Warning")],
-  };
-  const [k, label] = map[status] || ["", status];
+});
+export const statusLabel = (status, t) => (statusMap(t)[status] || ["", status])[1];
+export function StatusBadge({ status }) {
+  const { t } = useApp();
+  const [k, label] = statusMap(t)[status] || ["", status];
   return <Badge kind={k}>{label}</Badge>;
 }
 
