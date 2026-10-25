@@ -68,7 +68,7 @@ export function Employees() {
   const salaries = can("hr.salaries");
   const fields = EMPLOYEE_FIELDS(t).filter((f) => salaries || !(PAY_KEYS.includes(f.key) || f.pay));
   return <Resource cfg={{
-    table: "employees", title: t("الموظفون", "Employees"), select: salaries ? "*, departments(name_ar), employee_pay(*)" : "*, departments(name_ar)", order: "code.asc",
+    table: "employees", title: t("الموظفون", "Employees"), select: salaries ? "*, departments!employees_department_id_fkey(name_ar), employee_pay(*)" : "*, departments!employees_department_id_fkey(name_ar)", order: "code.asc",
     // salaries live in employee_pay (permission hr.salaries); one database call saves both, for the form and the Excel import
     toForm: (r) => { const { employee_pay: _p, departments: _d, ...rest } = r; return { ...rest, ...(payOf(r) ? Object.fromEntries(PAY_KEYS.map((k) => [k, payOf(r)[k]])) : {}) }; },
     saveRecords: (rows) => rpc("save_employees", { p_rows: rows }),

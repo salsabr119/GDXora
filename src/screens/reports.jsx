@@ -70,7 +70,7 @@ export const REPORTS = (t) => [
     ],
     async load(f) {
       const [emps, projects] = await Promise.all([
-        fetchAll(() => supabase.from("employees").select("id, nationality, is_saudi, gender, job_title, status, project_id, hire_date, termination_date, departments(name_ar)").order("code")),
+        fetchAll(() => supabase.from("employees").select("id, nationality, is_saudi, gender, job_title, status, project_id, hire_date, termination_date, departments!employees_department_id_fkey(name_ar)").order("code")),
         L.projects()]);
       const list = f.scope === "all" ? emps : emps.filter((e) => e.status !== "terminated");
       const proj = Object.fromEntries(projects.map((p) => [p.id, p.name_ar]));
@@ -113,7 +113,7 @@ export const REPORTS = (t) => [
       { id: "180", label: t("6 أشهر", "6 months") }, { id: "365", label: t("سنة", "1 year") }] }],
     async load(f) {
       const emps = await fetchAll(() => supabase.from("employees")
-        .select("code, first_name_ar, last_name_ar, nationality, is_saudi, national_id, passport_no, id_expiry, passport_expiry, contract_type, contract_end_date, status, departments(name_ar)")
+        .select("code, first_name_ar, last_name_ar, nationality, is_saudi, national_id, passport_no, id_expiry, passport_expiry, contract_type, contract_end_date, status, departments!employees_department_id_fkey(name_ar)")
         .neq("status", "terminated").order("code"));
       const now = today(); const rows = [];
       for (const e of emps) {
@@ -219,7 +219,7 @@ export const REPORTS = (t) => [
       const period = Object.fromEntries(runs.map((r) => [r.id, r.period]));
       const [lines, projects] = await Promise.all([
         runs.length ? fetchAll(() => supabase.from("payroll_lines")
-          .select("run_id, employee_id, project_id, gross, gosi_employee, gosi_employer, advance_deduction, other_deductions, net, employees(code, first_name_ar, last_name_ar, departments(name_ar))")
+          .select("run_id, employee_id, project_id, gross, gosi_employee, gosi_employer, advance_deduction, other_deductions, net, employees(code, first_name_ar, last_name_ar, departments!employees_department_id_fkey(name_ar))")
           .in("run_id", runs.map((r) => r.id))) : [],
         L.projects()]);
       const proj = Object.fromEntries(projects.map((p) => [p.id, p.name_ar]));

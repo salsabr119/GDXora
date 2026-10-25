@@ -28,7 +28,7 @@ export function OrgChart() {
   const [over, setOver] = useState(() => new Map());  // per-node overrides of the base
   const [q, setQ] = useState("");
   const d = useData(async () => ({
-    emps: await run(supabase.from("employees").select("id, code, first_name_ar, last_name_ar, job_title, manager_id, department_id, status, departments(name_ar)")
+    emps: await run(supabase.from("employees").select("id, code, first_name_ar, last_name_ar, job_title, manager_id, department_id, status, departments!employees_department_id_fkey(name_ar)")
       .neq("status", "terminated").order("code")),
     depts: await run(supabase.from("departments").select("id, name_ar, parent_id, head_employee_id").order("name_ar")),
   }), []);
