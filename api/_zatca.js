@@ -95,7 +95,15 @@ export async function submitInvoice(orgId, invoiceId) {
   // issued before the company was onboarded: phase-1 XML (unsigned) — not sent to ZATCA
   if (inv.zatca_hash && !String(inv.zatca_xml || "").includes("<ext:UBLExtensions>")) return { phase: 1, legacy: true };
 
-  const cert = Buffer.from(egs.production_cert, "base64").toString();
+  // The developer-portal sandbox issues a fixed sample production CSID (bound to a sample VAT number) that
+  // rejects every real company with certificate-permissions. In the sandbox we therefore sign with the
+  // company's own compliance CSID and validate through /compliance/invoices, which runs the full checks
+  // (hash, signature, business rules) and answers CLEARED / REPORTED. Simulation and production use the
+  // production CSID and the real clearance / reporting endpoints.
+  const sandbox = egs.environment === "sandbox";
+  const csid = sandbox ? { token: egs.compliance_cert, secret: unseal(egs.compliance_secret_enc) }
+                       : { token: egs.production_cert, secret: unseal(egs.production_secret_enc) };
+  const cert = Buffer.from(csid.token, "base64").toString();
   if (!inv.zatca_hash) {
     const s = signInvoice(d, { privateKeyPem: unseal(egs.private_key_enc), certificate: cert });
     const { error } = await db.rpc("zatca_attach", { p_invoice: inv.id, p_hash: s.hash, p_qr: s.qr, p_xml: s.xml });
@@ -104,8 +112,9 @@ export async function submitInvoice(orgId, invoiceId) {
   }
 
   const standard = inv.invoice_kind === "standard";
-  const r = await zatcaCall(egs.environment, standard ? "/invoices/clearance/single" : "/invoices/reporting/single", {
-    auth: { token: egs.production_cert, secret: unseal(egs.production_secret_enc) }, clearance: standard,
+  const path = sandbox ? "/compliance/invoices" : standard ? "/invoices/clearance/single" : "/invoices/reporting/single";
+  const r = await zatcaCall(egs.environment, path, {
+    auth: csid, clearance: sandbox ? undefined : standard,
     body: { invoiceHash: inv.zatca_hash, uuid: inv.zatca_uuid, invoice: Buffer.from(inv.zatca_xml).toString("base64") },
   });
   const messages = messagesOf(r.json);
