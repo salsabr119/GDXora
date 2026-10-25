@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource, RecordForm, validateRecord } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Select } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Select, confirmDialog } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { eosb, gosi } from "../lib/payroll.js";
 import { today, isSaIban } from "../lib/format.js";
@@ -124,7 +124,10 @@ export function Leave() {
   const types = LEAVE_TYPES(t); const typeLabel = Object.fromEntries(types.map((x) => [x.id, x.label]));
 
   async function decide(r, ok) {
-    if (await act(async () => { await rpc("decide_leave", { p_leave: r.id, p_approve: ok }); return true; }, ok ? t("تم الاعتماد", "Approved") : t("تم الرفض", "Rejected"))) list.reload();
+    const who = `${r.employees?.first_name_ar} ${r.employees?.last_name_ar}`;
+    if (!await confirmDialog({ message: ok ? t(`اعتماد إجازة ${who} (${r.days} يوم من ${r.start_date})؟`, `Approve ${who}'s leave?`)
+                                           : t(`رفض طلب إجازة ${who}؟`, `Reject ${who}'s leave request?`), danger: !ok })) return;
+    if (await act(async () => { await rpc("decide_leave", { p_leave: r.id, p_approve: ok }); return true; }, ok ? t("تم اعتماد الإجازة\nتُخصم من رصيده، والإجازة بدون راتب تُخصم تلقائياً في المسيّر.", "Leave approved") : t("تم رفض طلب الإجازة", "Leave rejected"))) list.reload();
   }
   const leaveFields = [
             { key: "employee_id", label: t("الموظف", "Employee"), type: "select", required: true, options: emps.data || [] },

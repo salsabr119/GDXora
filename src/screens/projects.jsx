@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource, RecordForm, validateRecord } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Modal, Tabs, go, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Modal, Tabs, go, goBack, confirmDialog, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { num, today } from "../lib/format.js";
 
@@ -53,7 +53,8 @@ function ProjectImportDialog({ lookups, existing, onClose }) {
   async function commit() {
     if (!res) { v.check([t("اختر ملف المشروع أولاً", "Choose the project file first")]); return; }
     if (!v.check(res.errors)) return;
-    const id = await act(() => rpc("import_project", { p: res.payload }), t("تم رفع المشروع", "Project imported"));
+    if (!await confirmDialog(t(`رفع المشروع «${res.summary.name}» مع ${res.summary.items} بند${res.summary.newCustomer ? " وإضافة العميل الجديد" : ""}؟`, `Import project "${res.summary.name}" with ${res.summary.items} items?`))) return;
+    const id = await act(() => rpc("import_project", { p: res.payload }), t(`تم رفع المشروع «${res.summary.name}»\nجدول الكميات جاهز — يمكنك إعداد المستخلص القادم من تبويب المستخلصات.`, "Project imported"));
     if (id) { onClose(); go(`/projects/${id}`); }
   }
   const s = res?.summary;
@@ -169,7 +170,9 @@ export function ProjectDetail({ params }) {
     if (ok) { setBoqEdit(null); d.reload(); }
   }
   async function newBilling() {
-    const id = await act(() => rpc("prepare_progress_billing", { p_project: p.id, p_period_to: today() }));
+    if (!await confirmDialog(t("إعداد مستخلص جديد لهذا المشروع؟\nيُنشأ كمسودة بالكميات السابقة، وتدخل أنت الكميات التراكمية.", "Prepare a new progress billing for this project?"))) return;
+    const id = await act(() => rpc("prepare_progress_billing", { p_project: p.id, p_period_to: today() }),
+      t("تم إنشاء مسودة المستخلص\nأدخل الكميات التراكمية لكل بند، ثم «إنشاء الفاتورة».", "Draft billing created"));
     if (id) go(`/projects/${p.id}/billing/${id}`);
   }
   async function saveBudget(category, amount) {
@@ -186,7 +189,7 @@ export function ProjectDetail({ params }) {
   return (
     <>
       <PageHead title={`${p.code} — ${p.name_ar}`} sub={<span className="row"><StatusBadge status={p.status} />{lk.data?.customers?.find((c) => c.id === p.customer_id)?.name_ar}</span>}>
-        <button className="btn" onClick={() => go("/projects")}>{t("رجوع", "Back")}</button>
+        <button className="btn" onClick={() => goBack("/projects")}>{t("رجوع", "Back")}</button>
         {manage && <button className="btn" onClick={() => setEdit({ ...p })}>{t("تعديل", "Edit")}</button>}
         {manage && boq.length > 0 && <button className="btn primary" onClick={newBilling} disabled={busy}>{t("+ مستخلص جديد", "+ New progress billing")}</button>}
       </PageHead>
@@ -296,19 +299,19 @@ export function ProgressBilling({ params }) {
   async function onSave() { if (!iss.check(problems(false))) return; if (await act(async () => { await saveQty(); return true; }, t("تم الحفظ", "Saved"))) { setQty({}); d.reload(); } }
   async function onInvoice() {
     if (!iss.check(problems(true))) return;
-    if (!window.confirm(t("إنشاء فاتورة المستخلص؟ ستُحسب المحتجزات واسترداد الدفعة المقدمة تلقائياً.", "Create the billing invoice? Retention and advance recovery are applied automatically."))) return;
-    const inv = await act(async () => { await saveQty(); return rpc("invoice_progress_billing", { p_billing: pb.id }); }, t("تم إنشاء مسودة الفاتورة", "Draft invoice created"));
+    if (!await confirmDialog(t("إنشاء فاتورة المستخلص؟ ستُحسب المحتجزات واسترداد الدفعة المقدمة تلقائياً.", "Create the billing invoice? Retention and advance recovery are applied automatically."))) return;
+    const inv = await act(async () => { await saveQty(); return rpc("invoice_progress_billing", { p_billing: pb.id }); }, t("تم إنشاء مسودة فاتورة المستخلص\nراجعها ثم «إصدار» لتوليد رمز QR وترحيل القيد.", "Draft invoice created"));
     if (inv) go(`/sales/invoices/${inv}`);
   }
   async function onDelete() {
-    if (!window.confirm(t("حذف المستخلص؟", "Delete billing?"))) return;
+    if (!await confirmDialog(t("حذف المستخلص؟", "Delete billing?"))) return;
     if (await act(async () => { await run(supabase.from("progress_billings").delete().eq("id", pb.id)); return true; })) go(`/projects/${params.id}`);
   }
 
   return (
     <>
       <PageHead title={`${t("مستخلص رقم", "Progress billing #")} ${pb.billing_no} — ${pb.projects.name_ar}`} sub={<StatusBadge status={pb.status} />}>
-        <button className="btn" onClick={() => go(`/projects/${params.id}`)}>{t("رجوع", "Back")}</button>
+        <button className="btn" onClick={() => goBack(`/projects/${params.id}`)}>{t("رجوع", "Back")}</button>
         {draft && <button className="btn danger" onClick={onDelete} disabled={busy}>{t("حذف", "Delete")}</button>}
         {draft && <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ الكميات", "Save quantities")}</button>}
         {draft && <button className="btn primary" onClick={onInvoice} disabled={busy}>{t("إنشاء الفاتورة", "Create invoice")}</button>}

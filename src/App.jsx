@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { supabase, configured, rpc, run, setOrg, getOrg } from "./supabase.js";
-import { AppCtx, useRoute, match, go, useToasts, ErrorBoundary } from "./ui.jsx";
+import { AppCtx, useRoute, match, go, useToasts, ErrorBoundary, ConfirmHost } from "./ui.jsx";
 import { NAV, DETAIL_ROUTES } from "./nav.js";
 import { Auth, Onboarding } from "./screens/auth.jsx";
 
@@ -71,7 +71,7 @@ export default function App() {
     return (
       <AppCtx.Provider value={ctx}>
         <Onboarding onCreated={async (id) => { await loadOrgs(); await selectOrg(id); go("/"); }} />
-        {toasts.view}
+        {toasts.view}<ConfirmHost />
       </AppCtx.Provider>
     );
   }
@@ -126,7 +126,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      {toasts.view}
+      {toasts.view}<ConfirmHost />
     </AppCtx.Provider>
   );
 }

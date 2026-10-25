@@ -24,6 +24,20 @@ export function useRoute() {
 }
 export const go = (path) => { window.location.hash = path; };
 
+// in-app trail of visited pages, so "Back" returns where the user came from
+// (e.g. payroll → its journal entry → back to the payroll, not the journal list)
+const trail = [currentPath()];
+window.addEventListener("hashchange", () => {
+  const p = currentPath();
+  if (trail.length > 1 && trail[trail.length - 2] === p) trail.pop();
+  else if (trail[trail.length - 1] !== p) trail.push(p);
+});
+/** go back inside the app; opened directly (no in-app history) → the fallback list */
+export function goBack(fallback) {
+  if (trail.length > 1) window.history.back();
+  else go(fallback);
+}
+
 /** match "/sales/invoices/:id" against a path → params or null */
 export function match(pattern, path) {
   const a = pattern.split("/").filter(Boolean);
@@ -81,17 +95,23 @@ export function useAction() {
 /* ── toasts ──────────────────────────────────────────────────────────── */
 export function useToasts(lang) {
   const [items, setItems] = useState([]);
+  // text may carry a second line ("what happened\nwhat to do next") — those stay longer
   const notify = useCallback((text, kind = "") => {
     const id = Math.random();
     setItems((x) => [...x.slice(-2), { id, text, kind }]);
-    setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), kind === "bad" ? 7000 : 3500);
+    setTimeout(() => setItems((x) => x.filter((i) => i.id !== id)), kind === "bad" ? 8000 : String(text).includes("\n") ? 7000 : 4000);
   }, []);
   const notifyError = useCallback((e) => {
     if (isStaleChunk(e) && reloadForNewVersion()) return;   // new deployment: reload to the new version
     notify(friendlyError(e, lang), "bad");
   }, [notify, lang]);
   const view = (
-    <div className="toasts">{items.map((i) => <div key={i.id} className={`toast ${i.kind}`}>{i.text}</div>)}</div>
+    <div className="toasts">{items.map((i) => {
+      const [head, ...rest] = String(i.text).split("\n");
+      return <div key={i.id} className={`toast ${i.kind}`} role="status">
+        {i.kind === "ok" && "✓ "}<b>{head}</b>{rest.length > 0 && <div className="toast-detail">{rest.join("\n")}</div>}
+        <button className="toast-x" aria-label="close" onClick={() => setItems((x) => x.filter((y) => y.id !== i.id))}>×</button></div>;
+    })}</div>
   );
   return { notify, notifyError, view };
 }
@@ -332,4 +352,28 @@ export function Tabs({ tabs, value, onChange }) {
 export function useName() {
   const { lang } = useApp();
   return useMemo(() => (r, ar = "name_ar", en = "name_en") => (r ? (lang === "en" && r[en]) || r[ar] || "—" : "—"), [lang]);
+}
+
+/* ── confirmation dialog ─────────────────────────────────────────────
+   await confirmDialog("message") or confirmDialog({ title, message, confirm, danger })
+   → true / false. Rendered by <ConfirmHost/> (mounted once in App). */
+let openConfirm = null;
+export function confirmDialog(opts) {
+  const o = typeof opts === "string" ? { message: opts } : opts;
+  if (o.danger === undefined) o.danger = /حذف|إلغاء|إزالة|عكس|إيقاف|Delete|Revoke|Remove|revers|Disable/i.test(`${o.title || ""} ${o.message || ""}`);
+  return new Promise((resolve) => (openConfirm ? openConfirm({ ...o, resolve }) : resolve(window.confirm(o.message || o.title))));
+}
+export function ConfirmHost() {
+  const { t } = useApp();
+  const [c, setC] = useState(null);
+  useEffect(() => { openConfirm = setC; return () => { openConfirm = null; }; }, []);
+  if (!c) return null;
+  const done = (v) => { c.resolve(v); setC(null); };
+  return (
+    <Modal title={c.title || (c.danger ? t("تأكيد", "Please confirm") : t("هل أنت متأكد؟", "Are you sure?"))} onClose={() => done(false)}
+           footer={<><span style={{ flex: 1 }} /><button className="btn" onClick={() => done(false)}>{c.cancel || t("تراجع", "Cancel")}</button>
+             <button className={`btn ${c.danger ? "danger" : "primary"}`} autoFocus onClick={() => done(true)}>{c.confirm || (c.danger ? t("نعم، متأكد", "Yes, do it") : t("نعم، تأكيد", "Yes, confirm"))}</button></>}>
+      <p className="confirm-msg">{c.message}</p>
+    </Modal>
+  );
 }

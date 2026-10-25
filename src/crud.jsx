@@ -3,7 +3,7 @@
 // have their own components.
 import { useMemo, useRef, useState } from "react";
 import { supabase, run } from "./supabase.js";
-import { useApp, useData, useAction, PageHead, Panel, Table, Modal, Field, Issues, useIssues } from "./ui.jsx";
+import { useApp, useData, useAction, PageHead, Panel, Table, Modal, Field, Issues, useIssues, confirmDialog } from "./ui.jsx";
 
 /**
  * field: { key, label, type: text|number|money|date|select|checkbox|textarea|email|tel,
@@ -116,12 +116,13 @@ export function Resource({ cfg }) {
       else if (edit.id) await run(supabase.from(cfg.table).update(record).eq("id", edit.id));
       else await run(supabase.from(cfg.table).insert(record));
       return true;
-    }, t("تم الحفظ", "Saved"));
+    }, edit.id ? t(`تم حفظ التعديلات${edit.name_ar || edit.first_name_ar ? ` على «${edit.name_ar || `${edit.first_name_ar} ${edit.last_name_ar || ""}`.trim()}»` : ""}`, "Changes saved")
+               : t(`تمت الإضافة${edit.name_ar || edit.first_name_ar ? `: «${edit.name_ar || `${edit.first_name_ar} ${edit.last_name_ar || ""}`.trim()}»` : ""}`, "Added"));
     if (ok) { setEdit(null); list.reload(); }
   }
 
   async function remove() {
-    if (!window.confirm(t("حذف هذا السجل؟", "Delete this record?"))) return;
+    if (!await confirmDialog(t("حذف هذا السجل نهائياً؟\nلا يمكن التراجع عن الحذف.", "Delete this record permanently?"))) return;
     const ok = await act(async () => { await run(supabase.from(cfg.table).delete().eq("id", edit.id)); return true; },
       t("تم الحذف", "Deleted"));
     if (ok) { setEdit(null); list.reload(); }
@@ -227,13 +228,14 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
   async function commit() {
     if (!result) { v.check([t("اختر ملف Excel أولاً", "Choose an Excel file first")]); return; }
     if (!v.check(bad.slice(0, 200).flatMap((r) => r.errors.map((e) => t(`سطر ${r.line}: ${e}`, `Row ${r.line}: ${e}`))))) return;
+    if (!await confirmDialog(t(`استيراد ${result.rows.length} سجل إلى «${cfg.title}»؟\nستُضاف كلها دفعة واحدة.`, `Import ${result.rows.length} records into "${cfg.title}"?`))) return;
     const ok = await act(async () => {
       // one request → one statement: either every row is saved or none is
       const records = result.rows.map((r) => r.record);
       if (cfg.saveRecords) await cfg.saveRecords(records);
       else await run(supabase.from(cfg.table).insert(records, { defaultToNull: false }));
       return true;
-    }, t(`تم استيراد ${result.rows.length} سجل`, `Imported ${result.rows.length} records`));
+    }, t(`تم استيراد ${result.rows.length} سجل\nتظهر الآن في قائمة «${cfg.title}».`, `Imported ${result.rows.length} records`));
     if (ok) onDone();
   }
 
