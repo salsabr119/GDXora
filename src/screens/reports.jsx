@@ -257,7 +257,7 @@ export const REPORTS = (t) => [
     desc: t("الأجر الخاضع وحصة الموظف وحصة المنشأة لكل موظف في مسيّر شهر معيّن", "Contributory wage and employee / employer shares per employee for a month's payroll"),
     filters: [{ key: "period", label: t("الشهر", "Month"), type: "month", default: () => today().slice(0, 7) }],
     async load(f) {
-      const runs = await run(supabase.from("payroll_runs").select("id, status").eq("period", f.period));
+      const runs = await run(supabase.from("payroll_runs").select("id, status").eq("period", f.period).eq("run_type", "regular"));
       if (!runs.length) return { rows: [], columns: [], empty: t("لا يوجد مسيّر رواتب لهذا الشهر", "No payroll run for this month") };
       const lines = await fetchAll(() => supabase.from("payroll_lines")
         .select("is_saudi, gosi_wage, gosi_employee, gosi_employer, employees(code, first_name_ar, last_name_ar, national_id, gosi_number, nationality)")

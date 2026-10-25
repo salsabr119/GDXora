@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Modal, go, useName, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Modal, go, goBack, confirmDialog, useName, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { today, num } from "../lib/format.js";
 
@@ -125,6 +125,7 @@ function OpeningImportDialog({ onClose }) {
     if (!res) { v.check([t("اختر ملف الأرصدة أولاً", "Choose the balances file first")]); return; }
     if (!date) { v.check([t("أدخل تاريخ الأرصدة الافتتاحية", "Enter the opening balances date")]); return; }
     if (!v.check(res.errors.slice(0, 200))) return;
+    if (!await confirmDialog(t(`إنشاء قيد الأرصدة الافتتاحية بتاريخ ${date} (${res.lines.length} سطر، ${num(res.dr)})؟\nيُنشأ كمسودة تراجعها ثم ترحّلها.`, `Create the opening entry dated ${date}?`))) return;
     const id = await act(() => rpc("create_journal", {
       p_date: date, p_memo: t("الأرصدة الافتتاحية", "Opening balances"), p_post: false, p_source: "opening",
       p_lines: res.lines.map((l) => ({ account_id: l.acc.id, debit: l.debit, credit: l.credit, description: l.description,
@@ -254,20 +255,21 @@ export function JournalEditor({ params }) {
 
   async function save(post) {
     if (!v.check(problems(post))) return;
+    if (post && !await confirmDialog(t(`ترحيل القيد بمبلغ ${num(dr)}؟\nبعد الترحيل لا يمكن تعديله — التصحيح يكون بقيد عكسي.`, `Post this entry of ${num(dr)}? It can't be edited afterwards.`))) return;
     const id = await act(async () => {
       if (isNew) return rpc("create_journal", { p_date: form.entry_date, p_memo: form.memo, p_lines: payload(), p_post: post });
       await rpc("update_journal_draft", { p_entry: params.id, p_date: form.entry_date, p_memo: form.memo, p_lines: payload(), p_post: post });
       return params.id;
-    }, post ? t("تم ترحيل القيد", "Entry posted") : t("تم حفظ المسودة", "Draft saved"));
+    }, post ? t("تم ترحيل القيد\nانعكس على ميزان المراجعة وكشوف الحسابات.", "Entry posted") : t("تم حفظ القيد كمسودة\nلا يؤثر على الحسابات حتى ترحّله.", "Draft saved"));
     if (id) { if (isNew) go(`/accounting/journals/${id}`); else entry.reload(); }
   }
   async function reverse() {
-    if (!window.confirm(t("إنشاء قيد عكسي بتاريخ اليوم؟", "Create a reversing entry dated today?"))) return;
-    const id = await act(() => rpc("reverse_journal", { p_entry: params.id, p_date: today() }), t("تم عكس القيد", "Entry reversed"));
+    if (!await confirmDialog(t("إنشاء قيد عكسي بتاريخ اليوم؟", "Create a reversing entry dated today?"))) return;
+    const id = await act(() => rpc("reverse_journal", { p_entry: params.id, p_date: today() }), t("تم إنشاء القيد العكسي وترحيله\nأُلغي أثر القيد الأصلي على الحسابات.", "Entry reversed"));
     if (id) go(`/accounting/journals/${id}`);
   }
   async function removeDraft() {
-    if (!window.confirm(t("حذف المسودة؟", "Delete draft?"))) return;
+    if (!await confirmDialog(t("حذف المسودة؟", "Delete draft?"))) return;
     const ok = await act(async () => { await run(supabase.from("journal_entries").delete().eq("id", params.id)); return true; });
     if (ok) go("/accounting/journals");
   }
@@ -280,7 +282,7 @@ export function JournalEditor({ params }) {
     <>
       <PageHead title={isNew ? t("قيد يدوي جديد", "New manual entry") : `${t("قيد", "Entry")} ${e.number || t("(مسودة)", "(draft)")}`}
                 sub={e && <StatusBadge status={e.status} />}>
-        <button className="btn" onClick={() => go("/accounting/journals")}>{t("رجوع", "Back")}</button>
+        <button className="btn" onClick={() => goBack("/accounting/journals")}>{t("رجوع", "Back")}</button>
         {!isNew && e.status === "draft" && can("accounting.manage") && <button className="btn danger" onClick={removeDraft} disabled={busy}>{t("حذف", "Delete")}</button>}
         {editable && can("accounting.manage") && <button className="btn" onClick={() => save(false)} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>}
         {editable && can("accounting.post") && <button className="btn primary" onClick={() => save(true)} disabled={busy}>{t("ترحيل", "Post")}</button>}
@@ -501,8 +503,8 @@ export function Periods() {
   const [act, busy] = useAction();
   const list = useData(() => run(supabase.from("fiscal_periods").select("*").order("start_date")), []);
   async function close(p) {
-    if (!window.confirm(t(`إقفال الفترة ${p.name}؟ لن يمكن الترحيل عليها بعد ذلك.`, `Close ${p.name}? No further posting will be allowed.`))) return;
-    if (await act(async () => { await rpc("close_period", { p_period: p.id }); return true; }, t("تم الإقفال", "Closed"))) list.reload();
+    if (!await confirmDialog(t(`إقفال الفترة ${p.name}؟ لن يمكن الترحيل عليها بعد ذلك.`, `Close ${p.name}? No further posting will be allowed.`))) return;
+    if (await act(async () => { await rpc("close_period", { p_period: p.id }); return true; }, t("تم إقفال الفترة\nلن يُقبل أي ترحيل بتاريخ داخلها.", "Period closed"))) list.reload();
   }
   async function addYear() {
     const y = Number((list.data?.at(-1)?.start_date || today()).slice(0, 4)) + (list.data?.length ? 1 : 0);

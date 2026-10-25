@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { supabase, rpc, run, getOrg } from "../supabase.js";
 import { RecordForm, validateRecord } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading, confirmDialog } from "../ui.jsx";
 import { isVatNumber, isSaIban, today } from "../lib/format.js";
 import { imageFileToDataUrl } from "../lib/pdf.js";
 
@@ -111,6 +111,11 @@ export function Users() {
     d.reload();
   }
   async function updateMember(m, patch) {
+    const who = m.full_name || m.email;
+    const msg = "active" in patch
+      ? (patch.active ? t(`إعادة تفعيل ${who}؟ سيتمكن من الدخول مجدداً.`, `Re-enable ${who}?`) : t(`إيقاف ${who}؟ لن يتمكن من الدخول لهذه الشركة.`, `Disable ${who}? They won't be able to sign in to this company.`))
+      : t(`تغيير دور ${who} إلى «${roleOpts.find((r) => r.id === patch.role_key)?.label}»؟ تتغير صلاحياته فوراً.`, `Change ${who}'s role?`);
+    if (!await confirmDialog(msg)) { d.reload(); return; }
     if (await act(async () => { await run(supabase.from("org_members").update(patch).eq("user_id", m.user_id)); return true; }, t("تم التحديث", "Updated"))) d.reload();
   }
   // an existing GDXora account is added directly; a new address gets an invitation e-mail
@@ -148,7 +153,7 @@ export function Users() {
   async function deleteRole() {
     const used = members.filter((m) => m.role_key === role && !m.is_owner).length;
     if (used) { iss.check([t(`لا يمكن حذف الدور: ${used} مستخدم مرتبط به — غيّر دورهم أولاً`, `Cannot delete: ${used} user(s) have this role — change their role first`)]); return; }
-    if (!window.confirm(t("حذف هذا الدور؟", "Delete this role?"))) return;
+    if (!await confirmDialog(t("حذف هذا الدور؟", "Delete this role?"))) return;
     const ok = await act(async () => {
       await run(supabase.from("role_permissions").delete().eq("role_key", role));
       await run(supabase.from("roles").delete().eq("key", role));
@@ -274,7 +279,7 @@ export function Integrations() {
         { key: "scopes", label: t("الصلاحيات", "Scopes"), render: (k) => <span className="mono" style={{ fontSize: 11 }}>{k.scopes.join(", ")}</span> },
         { key: "last_used_at", label: t("آخر استخدام", "Last used"), render: (k) => k.last_used_at ? <DateText v={k.last_used_at} /> : "—" },
         { key: "s", label: "", render: (k) => k.revoked_at ? <Badge kind="bad">{t("ملغى", "Revoked")}</Badge>
-            : <button className="btn sm danger" disabled={busy} onClick={async () => { if (window.confirm(t("إلغاء المفتاح نهائياً؟", "Revoke this key?")) && await act(() => rpc("revoke_api_key", { p_id: k.id }))) keys.reload(); else keys.reload(); }}>{t("إلغاء", "Revoke")}</button> }]} /></Panel>}
+            : <button className="btn sm danger" disabled={busy} onClick={async () => { if (await confirmDialog(t("إلغاء المفتاح نهائياً؟", "Revoke this key?")) && await act(() => rpc("revoke_api_key", { p_id: k.id }))) keys.reload(); else keys.reload(); }}>{t("إلغاء", "Revoke")}</button> }]} /></Panel>}
       {tab === "hooks" && <Panel pad={false}><Table rows={hooks.data} loading={hooks.loading} onRow={(h) => setHook({ ...h })} columns={[
         { key: "url", label: "URL", render: (h) => <span className="mono">{h.url}</span> },
         { key: "events", label: t("الأحداث", "Events"), render: (h) => <span className="mono" style={{ fontSize: 11 }}>{h.events.join(", ")}</span> },

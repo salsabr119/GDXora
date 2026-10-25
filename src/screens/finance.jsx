@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource, RecordForm, validateRecord } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Tabs, Select, go, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Field, Modal, Tabs, Select, go, Loading, goBack, confirmDialog } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { today, num, isVatNumber, isSaIban } from "../lib/format.js";
 import { DateRange } from "./accounting.jsx";
@@ -101,7 +101,7 @@ export function BillEditor({ params }) {
     return (
       <>
         <PageHead title={`${t("فاتورة مورد", "Bill")} ${b.number || ""}`} sub={<StatusBadge status={b.status} />}>
-          <button className="btn" onClick={() => go("/finance/bills")}>{t("رجوع", "Back")}</button>
+          <button className="btn" onClick={() => goBack("/finance/bills")}>{t("رجوع", "Back")}</button>
           {b.status === "posted" && balance > 0 && can("finance.manage") && <button className="btn primary" onClick={() => go(`/finance/payments?bill=${b.id}`)}>{t("تسجيل سداد", "Record payment")}</button>}
           {b.journal_entry_id && <a className="btn" href={`#/accounting/journals/${b.journal_entry_id}`}>{t("القيد", "Journal")}</a>}
         </PageHead>
@@ -158,13 +158,19 @@ export function BillEditor({ params }) {
   }
   const after = (id) => { if (isNew) go(`/finance/bills/${id}`); else { setForm(null); bill.reload(); } };
   async function onSave() { if (!iss.check(problems(false))) return; const id = await act(save, t("تم الحفظ", "Saved")); if (id) after(id); }
-  async function onPost() { if (!iss.check(problems(true))) return; const id = await act(async () => { const id = await save(); await rpc("post_bill", { p_bill: id }); return id; }, t("تم ترحيل الفاتورة", "Bill posted")); if (id) after(id); }
+  async function onPost() {
+    if (!iss.check(problems(true))) return;
+    if (!await confirmDialog(t("ترحيل فاتورة المورد؟\nبعد الترحيل لا يمكن تعديلها، ويُسجّل المبلغ على حساب المورد.", "Post the vendor bill? It can't be edited afterwards."))) return;
+    const id = await act(async () => { const id = await save(); await rpc("post_bill", { p_bill: id }); return id; },
+      t("تم ترحيل فاتورة المورد\nسُجّل القيد والمستحق للمورد. السداد من «سندات القبض والصرف».", "Bill posted"));
+    if (id) after(id);
+  }
 
   return (
     <>
       <PageHead title={isNew ? t("فاتورة مورد جديدة", "New bill") : t("فاتورة مورد — مسودة", "Bill — draft")}>
-        <button className="btn" onClick={() => go("/finance/bills")}>{t("رجوع", "Back")}</button>
-        {!isNew && <button className="btn danger" disabled={busy} onClick={async () => { if (window.confirm(t("حذف المسودة؟", "Delete draft?")) && await act(async () => { await run(supabase.from("bills").delete().eq("id", params.id)); return true; })) go("/finance/bills"); }}>{t("حذف", "Delete")}</button>}
+        <button className="btn" onClick={() => goBack("/finance/bills")}>{t("رجوع", "Back")}</button>
+        {!isNew && <button className="btn danger" disabled={busy} onClick={async () => { if (await confirmDialog(t("حذف المسودة؟", "Delete draft?")) && await act(async () => { await run(supabase.from("bills").delete().eq("id", params.id)); return true; })) go("/finance/bills"); }}>{t("حذف", "Delete")}</button>}
         <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>
         {can("finance.approve") && <button className="btn primary" onClick={onPost} disabled={busy}>{t("ترحيل", "Post")}</button>}
       </PageHead>
@@ -266,6 +272,7 @@ export function Payments() {
     if (bl && Number(e.amount) > Number(bl.net_payable) - Number(bl.amount_paid) + 0.001)
       out.push({ key: "amount", msg: t(`المبلغ أكبر من المتبقي على فاتورة المورد (${num(Number(bl.net_payable) - Number(bl.amount_paid))})`, "Amount exceeds the bill balance") });
     if (!iss.check(out)) return;
+    if (post && !await confirmDialog(t(`ترحيل سند ${e.direction === "receipt" ? "القبض" : "الصرف"} بمبلغ ${num(e.amount)}؟\nبعد الترحيل لا يمكن تعديله.`, `Post this voucher of ${num(e.amount)}? It can't be edited afterwards.`))) return;
     const rec = {};
     for (const f of fields) rec[f.key] = e[f.key] ?? null;
     for (const k of ["invoice_id", "bill_id", "customer_id", "vendor_id", "counter_account_id"]) if (!fields.find((f) => f.key === k)) rec[k] = null;
@@ -275,7 +282,7 @@ export function Payments() {
       else id = (await run(supabase.from("payments").insert(rec).select("id").single())).id;
       if (post) await rpc("post_payment", { p_payment: id });
       return id;
-    }, post ? t("تم ترحيل السند", "Voucher posted") : t("تم الحفظ", "Saved"));
+    }, post ? t("تم ترحيل السند\nسُجّل القيد وتحدّث رصيد الصندوق/البنك والطرف المقابل.", "Voucher posted") : t("تم حفظ السند كمسودة", "Saved as draft"));
     if (id) { setEdit(null); list.reload(); lk.reload(); window.location.hash = "#/finance/payments"; }
   }
   const dir = { receipt: t("قبض", "Receipt"), payment: t("صرف", "Payment") };

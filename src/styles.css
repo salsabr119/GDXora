@@ -287,3 +287,9 @@ tr.invalid td { background: #fff6f5; }
 .org-members::before, .org-members li::before, .org-members li::after { display: none !important; }
 .org-members li { padding: 2px 0 !important; text-align: start; }
 @media print { .org { overflow: visible; } }
+
+/* ── toasts with detail + confirmation dialog ── */
+.toast { position: relative; padding-inline-end: 28px; max-width: 420px; }
+.toast-detail { font-weight: 400; font-size: 13px; opacity: .92; margin-top: 3px; white-space: pre-line; }
+.toast-x { position: absolute; top: 4px; inset-inline-end: 6px; background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; opacity: .8; }
+.confirm-msg { margin: 0; line-height: 1.8; white-space: pre-line; font-size: 15px; }

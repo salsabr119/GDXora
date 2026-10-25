@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource } from "../crud.jsx";
-import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Select, go, Loading } from "../ui.jsx";
+import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Select, go, Loading, goBack, confirmDialog } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { processInvoice } from "../lib/zatca/index.js";
 import { today, num, isVatNumber } from "../lib/format.js";
@@ -247,18 +247,18 @@ export function InvoiceEditor({ params }) {
   }
   async function onIssue() {
     if (!v.check(problems(true))) return;
-    if (!window.confirm(t("إصدار الفاتورة؟ بعد الإصدار لا يمكن تعديلها (التصحيح بإشعار دائن/مدين فقط).",
+    if (!await confirmDialog(t("إصدار الفاتورة؟ بعد الإصدار لا يمكن تعديلها (التصحيح بإشعار دائن/مدين فقط).",
                           "Issue the invoice? It becomes immutable (corrections via credit/debit notes only)."))) return;
     const id = await act(async () => {
       const id = await save();
       await rpc("issue_invoice", { p_invoice: id });
       await zatcaProcess(id);
       return id;
-    }, t("تم إصدار الفاتورة وتوليد رمز QR وتوقيع ZATCA", "Invoice issued, QR and ZATCA hash generated"));
+    }, t("تم إصدار الفاتورة\nتولّد رمز QR وبصمة ZATCA وتم ترحيل القيد. يمكنك الآن تنزيل PDF أو مشاركتها.", "Invoice issued, QR and ZATCA hash generated"));
     if (id) { if (isNew) go(`/sales/invoices/${id}`); else { setForm(null); inv.reload(); } }
   }
   async function onDelete() {
-    if (!window.confirm(t("حذف المسودة؟", "Delete draft?"))) return;
+    if (!await confirmDialog(t("حذف المسودة؟", "Delete draft?"))) return;
     if (await act(async () => { await run(supabase.from("invoices").delete().eq("id", params.id)); return true; })) go("/sales/invoices");
   }
 
@@ -266,7 +266,7 @@ export function InvoiceEditor({ params }) {
   return (
     <>
       <PageHead title={isNew ? `${doc[form.doc_type]} ${t("جديدة", "— new")}` : `${doc[form.doc_type]} — ${t("مسودة", "draft")}`}>
-        <button className="btn" onClick={() => go("/sales/invoices")}>{t("رجوع", "Back")}</button>
+        <button className="btn" onClick={() => goBack("/sales/invoices")}>{t("رجوع", "Back")}</button>
         {!isNew && can("sales.manage") && <button className="btn danger" onClick={onDelete} disabled={busy}>{t("حذف", "Delete")}</button>}
         {can("sales.manage") && <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ كمسودة", "Save draft")}</button>}
         {can("sales.issue") && <button className="btn primary" onClick={onIssue} disabled={busy}>{t("إصدار الفاتورة", "Issue invoice")}</button>}
@@ -372,7 +372,7 @@ function InvoiceView({ inv, reload }) {
   return (
     <>
       <PageHead title={`${titles[inv.doc_type]} ${inv.number}`} sub={<span className="row"><StatusBadge status="issued" />{payState(inv) && <StatusBadge status={payState(inv)} />}</span>}>
-        <button className="btn no-print" onClick={() => go("/sales/invoices")}>{t("رجوع", "Back")}</button>
+        <button className="btn no-print" onClick={() => goBack("/sales/invoices")}>{t("رجوع", "Back")}</button>
         {!inv.zatca_hash && can("sales.issue") && <button className="btn accent no-print" disabled={busy}
           onClick={async () => { if (await act(async () => { await zatcaProcess(inv.id); return true; }, t("تمت معالجة ZATCA", "ZATCA processed"))) reload(); }}>{t("إعادة معالجة ZATCA", "Retry ZATCA")}</button>}
         {inv.zatca_xml && <button className="btn no-print" onClick={downloadXml}>{t("تنزيل XML", "Download XML")}</button>}
