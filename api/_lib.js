@@ -32,3 +32,26 @@ export async function readJson(req) {
 export class HttpError extends Error {
   constructor(status, message) { super(message); this.status = status; }
 }
+
+/**
+ * The signed-in user behind a request and their standing in the company named
+ * by x-org-id. Throws 401/403. perm: required permission (owner passes).
+ * @returns {{ user, orgId, admin }} admin = service-role client (bypasses RLS)
+ */
+export async function requireMember(req, perm) {
+  const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+  const orgId = String(req.headers["x-org-id"] || "");
+  if (!token || !/^[0-9a-f-]{36}$/i.test(orgId)) throw new HttpError(401, "sign in required");
+  const admin = serviceClient();
+  const { data: who, error } = await admin.auth.getUser(token);
+  if (error || !who?.user) throw new HttpError(401, "sign in required");
+  const { data: m } = await admin.from("org_members").select("is_owner, role_key, active")
+    .eq("org_id", orgId).eq("user_id", who.user.id).maybeSingle();
+  if (!m?.active) throw new HttpError(403, "not a member of this company");
+  if (perm && !m.is_owner) {
+    const { data: rp } = await admin.from("role_permissions").select("perm_key")
+      .eq("org_id", orgId).eq("role_key", m.role_key).eq("perm_key", perm).maybeSingle();
+    if (!rp) throw new HttpError(403, `permission denied: ${perm}`);
+  }
+  return { user: who.user, orgId, admin };
+}

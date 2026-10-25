@@ -2,6 +2,7 @@
 // events with an HMAC signature and exponential backoff (handled in SQL).
 import crypto from "node:crypto";
 import { serviceClient, send } from "../_lib.js";
+import { submitInvoice } from "../_zatca.js";
 
 export function sign(secret, timestamp, body) {
   return crypto.createHmac("sha256", secret).update(`${timestamp}.${body}`).digest("hex");
@@ -32,5 +33,16 @@ export default async function handler(req, res) {
     await db.rpc("mark_webhook_delivery", { p_id: d.delivery_id, p_ok: ok, p_status: status, p_error: err });
     return ok;
   }));
-  send(res, 200, { processed: results.length, delivered: results.filter((r) => r.status === "fulfilled" && r.value).length });
+  // ZATCA: invoices signed but not yet accepted because ZATCA was unreachable (simplified invoices must be reported within 24 h)
+  const { data: egs } = await db.from("zatca_egs").select("org_id").eq("status", "active");
+  let zatca = 0;
+  if (egs?.length) {
+    const { data: pending } = await db.from("invoices").select("id, org_id").eq("status", "issued").eq("zatca_status", "not_submitted")
+      .not("zatca_hash", "is", null).like("zatca_xml", "%<ext:UBLExtensions>%")
+      .in("org_id", egs.map((e) => e.org_id)).order("zatca_icv").limit(50);
+    for (const inv of pending || []) {
+      try { const r = await submitInvoice(inv.org_id, inv.id); if (r.status !== "not_submitted") zatca += 1; } catch { /* retried next run */ }
+    }
+  }
+  send(res, 200, { processed: results.length, delivered: results.filter((r) => r.status === "fulfilled" && r.value).length, zatca_resubmitted: zatca });
 }

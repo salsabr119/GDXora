@@ -130,6 +130,8 @@ export function buildInvoiceXml(d, { forHash = false } = {}) {
   // attributes are sorted by el(); xmlns < xmlns:cac < xmlns:cbc < xmlns:ext — already C14N order
 
   return el("Invoice", root,
+    // phase 2: the XAdES signature block (absent from the hash input)
+    !forHash && d.ublExtensions ? d.ublExtensions : "",
     t("cbc:ProfileID", "reporting:1.0"),
     t("cbc:ID", inv.number),
     t("cbc:UUID", inv.zatca_uuid),
@@ -148,6 +150,10 @@ export function buildInvoiceXml(d, { forHash = false } = {}) {
     !forHash && d.qr
       ? el("cac:AdditionalDocumentReference", null, t("cbc:ID", "QR"),
           el("cac:Attachment", null, t("cbc:EmbeddedDocumentBinaryObject", d.qr, { mimeCode: "text/plain" })))
+      : "",
+    !forHash && d.ublExtensions
+      ? el("cac:Signature", null, t("cbc:ID", "urn:oasis:names:specification:ubl:signature:Invoice"),
+          t("cbc:SignatureMethod", "urn:oasis:names:specification:ubl:dsig:enveloped:xades"))
       : "",
     party("cac:AccountingSupplierParty", d.seller, { isSeller: true }),
     party("cac:AccountingCustomerParty", d.buyer, { isSeller: false }),

@@ -40,3 +40,14 @@ export async function run(query) {
   if (error) throw error;
   return data;
 }
+
+/** POST to one of our serverless endpoints (api/*) as the signed-in user, in the active company. */
+export async function api(path, body) {
+  const { data: { session } } = await supabase.auth.getSession();
+  const resp = await fetch(path, { method: "POST",
+    headers: { "content-type": "application/json", authorization: `Bearer ${session?.access_token}`, "x-org-id": getOrg() || "" },
+    body: JSON.stringify(body || {}) });
+  const json = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(json.error || `HTTP ${resp.status}`);
+  return json;
+}

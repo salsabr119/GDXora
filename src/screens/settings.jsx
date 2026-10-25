@@ -1,5 +1,5 @@
 import { Fragment, useState } from "react";
-import { supabase, rpc, run, getOrg } from "../supabase.js";
+import { supabase, rpc, run, getOrg, api } from "../supabase.js";
 import { RecordForm, validateRecord } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading, confirmDialog } from "../ui.jsx";
 import { isVatNumber, isSaIban, today } from "../lib/format.js";
@@ -122,15 +122,7 @@ export function Users() {
   async function addMember(e) {
     e.preventDefault();
     if (!iss.check(validateRecord(memFields, add, t))) return;
-    const r = await act(async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      const resp = await fetch("/api/invite", { method: "POST",
-        headers: { "content-type": "application/json", authorization: `Bearer ${session?.access_token}`, "x-org-id": getOrg() },
-        body: JSON.stringify({ email: add.email, role_key: add.role_key, full_name: add.full_name || null }) });
-      const body = await resp.json().catch(() => ({}));
-      if (!resp.ok) throw new Error(body.error || `HTTP ${resp.status}`);
-      return body;
-    });
+    const r = await act(() => api("/api/invite", { email: add.email, role_key: add.role_key, full_name: add.full_name || null }));
     if (r) {
       notify(r.invited ? t(`أُرسلت دعوة إلى ${add.email} — يفتح الرابط في بريده ويختار كلمة المرور`, `Invitation sent to ${add.email}`)
                        : t("تمت إضافة المستخدم", "User added"), "ok");
