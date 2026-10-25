@@ -263,7 +263,7 @@ tr.invalid td { background: #fff6f5; }
 /* ── organisation chart (top-down tree; laid out LTR so the connector lines work, text stays RTL) ── */
 .org { overflow: auto; padding: 20px 12px; direction: ltr; }
 .org ul { display: flex; justify-content: center; position: relative; margin: 0; padding: 20px 0 0; }
-.org > ul { padding-top: 0; }
+.org > ul { padding-top: 0; width: max-content; min-width: 100%; }   /* wide charts scroll instead of being clipped on one side */
 .org li { list-style: none; text-align: center; position: relative; padding: 20px 5px 0; }
 .org li::before, .org li::after { content: ""; position: absolute; top: 0; right: 50%; width: 50%; height: 20px; border-top: 2px solid #c9d1db; }
 .org li::after { right: auto; left: 50%; border-left: 2px solid #c9d1db; }
