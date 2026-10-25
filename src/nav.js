@@ -42,7 +42,7 @@ export const NAV = [
     { path: "/hr/employees", label: ["الموظفون", "Employees"], perm: "hr.view", component: H.Employees },
     { path: "/hr/leave", label: ["الإجازات", "Leave"], perm: "hr.view", component: H.Leave },
     { path: "/hr/org-chart", label: ["الهيكل الوظيفي", "Org chart"], perm: "hr.view", component: OrgChart },
-    { path: "/hr/departments", label: ["الأقسام", "Departments"], perm: "hr.view", component: H.Departments },
+    { path: "/hr/departments", label: ["الوحدات التنظيمية", "Organisation units"], perm: "hr.view", component: H.Departments },
     { path: "/hr/eosb", label: ["مكافأة نهاية الخدمة", "End of service"], perm: "hr.view", component: H.Eosb },
   ]},
   { group: ["الرواتب", "Payroll"], module: "payroll", items: [

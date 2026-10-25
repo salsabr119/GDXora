@@ -81,7 +81,7 @@ export async function downloadTemplate({ name, ...opts }) {
   downloadBuffer(await wb.xlsx.writeBuffer(), `${safeName(name)}.xlsx`);
 }
 
-export async function buildTemplate({ entity, fields, lookups, t, rtl = true }) {
+export async function buildTemplate({ entity, fields, lookups, t, rtl = true, rows = [] }) {
   const ExcelJS = await load();
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(t("البيانات", "Data"), { views: [{ rightToLeft: rtl, state: "frozen", ySplit: 1 }] });
@@ -120,6 +120,19 @@ export async function buildTemplate({ entity, fields, lookups, t, rtl = true }) 
       ws.getColumn(c).numFmt = "@";          // text: keeps leading zeros (IDs, IBAN, phone)
     }
     if (validation) ws.dataValidations.add(range, validation);
+  });
+  // prefilled rows (current data to edit and upload back)
+  rows.forEach((rec, i) => {
+    cols.forEach((f, j) => {
+      const v = rec[f.key];
+      if (v === null || v === undefined || v === "") return;
+      const cell = ws.getCell(i + 2, j + 1);
+      if (f.type === "select") cell.value = optionsOf(f, lookups, rec).find((o) => o.id === v)?.label ?? String(v);
+      else if (f.type === "checkbox") cell.value = v ? "نعم" : "لا";
+      else if (f.type === "date" && /^\d{4}-\d{2}-\d{2}/.test(String(v))) { const [y, m, d] = String(v).slice(0, 10).split("-").map(Number); cell.value = new Date(Date.UTC(y, m - 1, d)); }
+      else if (f.type === "money" || f.type === "number") cell.value = Number(v);
+      else cell.value = String(v);
+    });
   });
   return wb;
 }

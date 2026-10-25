@@ -21,6 +21,8 @@ const payOf = (r) => (Array.isArray(r?.employee_pay) ? r.employee_pay[0] : r?.em
 const totalPay = (p) => (p ? Number(p.basic_salary) + Number(p.housing_allowance) + Number(p.transport_allowance) + Number(p.other_allowances) : null);
 
 const EMPLOYEE_FIELDS = (t) => [
+      { key: "code", label: t("رقم الموظف", "Employee no."), formHidden: true, ltr: true,
+        hint: t("اتركه فارغاً للموظف الجديد — يُعطى رقماً تلقائياً. للموظف الموجود يُستخدم لتحديث بياناته.", "Leave empty for a new employee. For an existing one it is used to update the record.") },
       { section: t("البيانات الشخصية", "Personal") },
       { key: "first_name_ar", label: t("الاسم الأول", "First name (AR)"), required: true },
       { key: "last_name_ar", label: t("اسم العائلة", "Last name (AR)"), required: true },
@@ -72,6 +74,10 @@ export function Employees() {
     // salaries live in employee_pay (permission hr.salaries); one database call saves both, for the form and the Excel import
     toForm: (r) => { const { employee_pay: _p, departments: _d, ...rest } = r; return { ...rest, ...(payOf(r) ? Object.fromEntries(PAY_KEYS.map((k) => [k, payOf(r)[k]])) : {}) }; },
     saveRecords: (rows) => rpc("save_employees", { p_rows: rows }),
+    // Excel round trip: match by employee number, then ID / iqama; the manager travels as a name
+    importKey: ["code", "national_id"],
+    toImport: (r, lk) => { const { employee_pay: _p, departments: _d, ...rest } = r; const m = (lk.employees || []).find((e) => e.id === r.manager_id);
+      return { ...rest, ...(payOf(r) ? Object.fromEntries(PAY_KEYS.map((k) => [k, payOf(r)[k]])) : {}), manager_ref: m ? `${m.first_name_ar} ${m.last_name_ar}` : null }; },
     managePerm: "hr.manage", search: ["code", "first_name_ar", "last_name_ar", "national_id", "job_title", "phone"],
     loadLookups: async () => ({ departments: await L.departments(), projects: await L.projects(), employees: await L.employees() }),
     defaults: { nationality: "SA", contract_type: "unlimited", status: "active", hire_date: today(), gosi_registered: true, gosi_scheme: "legacy",
@@ -91,19 +97,34 @@ export function Employees() {
   }} />;
 }
 
+export const UNIT_TYPES = (t) => [
+  { id: "sector", label: t("قطاع", "Sector") }, { id: "general_department", label: t("إدارة عامة", "General department") },
+  { id: "department", label: t("إدارة", "Department") }, { id: "section", label: t("قسم", "Section") }, { id: "unit", label: t("وحدة", "Unit") }];
+
 export function Departments() {
   const { t } = useApp();
-  const empName = (lk, id) => { const e = lk?.employees?.find((x) => x.id === id); return e ? `${e.first_name_ar} ${e.last_name_ar}` : "—"; };
+  const types = UNIT_TYPES(t);
+  const empName = (lk, id) => { const e = lk?.employees?.find((x) => x.id === id); return e ? `${e.first_name_ar} ${e.last_name_ar}` : ""; };
   return <Resource cfg={{
-    table: "departments", title: t("الأقسام", "Departments"), order: "name_ar.asc", managePerm: "hr.manage", canDelete: true,
-    sub: t("القسم يمكن أن يكون تحت قسم آخر، وله رئيس من الموظفين", "A department can sit under another and has a head"),
+    table: "departments", title: t("الوحدات التنظيمية", "Organisation units"), order: "name_ar.asc", managePerm: "hr.manage", canDelete: true,
+    sub: t("قطاعات وإدارات عامة وإدارات وأقسام ووحدات — كل وحدة يمكن أن تتبع وحدة أعلى، بأي عدد من المستويات", "Sectors, general departments, departments, sections and units — any number of levels"),
     loadLookups: async () => ({ departments: await L.departments(), employees: await L.employees() }),
-    columns: [{ key: "name_ar", label: t("القسم", "Department") }, { key: "name_en", label: "English" },
-      { key: "parent", label: t("يتبع", "Under"), render: (r, lk) => lk?.departments?.find((d) => d.id === r.parent_id)?.name_ar || "—" },
-      { key: "head", label: t("رئيس القسم", "Head"), render: (r, lk) => empName(lk, r.head_employee_id) }],
+    saveRecords: (rows) => rpc("save_departments", { p_rows: rows }),
+    importKey: ["code", "name_ar"],
+    toImport: (r, lk) => { const p = (lk.departments || []).find((d) => d.id === r.parent_id); return { ...r, parent_ref: p ? p.code || p.name_ar : null, head_ref: empName(lk, r.head_employee_id) || null }; },
+    defaults: { unit_type: "department" },
+    columns: [{ key: "name_ar", label: t("الوحدة", "Unit") }, { key: "type", label: t("النوع", "Type"), render: (r) => types.find((x) => x.id === r.unit_type)?.label },
+      { key: "code", label: t("الرمز", "Code"), render: (r) => <span className="mono">{r.code || ""}</span> },
+      { key: "parent", label: t("تتبع", "Under"), render: (r, lk) => lk?.departments?.find((d) => d.id === r.parent_id)?.name_ar || "—" },
+      { key: "head", label: t("الرئيس", "Head"), render: (r, lk) => empName(lk, r.head_employee_id) || "—" }],
     fields: [{ key: "name_ar", label: t("الاسم (عربي)", "Name (Arabic)"), required: true }, { key: "name_en", label: t("الاسم (إنجليزي)", "Name (English)"), ltr: true },
-      { key: "parent_id", label: t("يتبع قسم", "Under department"), type: "select", options: (lk, r) => (lk.departments || []).filter((d) => d.id !== r?.id) },
-      { key: "head_employee_id", label: t("رئيس القسم", "Head of department"), type: "select", options: (lk) => lk.employees || [] }],
+      { key: "unit_type", label: t("نوع الوحدة", "Unit type"), type: "select", required: true, options: types },
+      { key: "code", label: t("رمز الوحدة (اختياري)", "Unit code (optional)"), ltr: true },
+      { key: "parent_id", label: t("تتبع وحدة", "Under unit"), type: "select", import: false, options: (lk, r) => (lk.departments || []).filter((d) => d.id !== r?.id) },
+      { key: "parent_ref", label: t("تتبع (رمز أو اسم الوحدة الأعلى)", "Under (code or name of the parent unit)"), formHidden: true,
+        hint: t("يمكن أن تكون الوحدة الأعلى في نفس الملف", "The parent may be in the same file") },
+      { key: "head_employee_id", label: t("رئيس الوحدة", "Head of unit"), type: "select", import: false, options: (lk) => lk.employees || [] },
+      { key: "head_ref", label: t("الرئيس (رقم الموظف أو اسمه)", "Head (employee number or name)"), formHidden: true }],
   }} />;
 }
 
