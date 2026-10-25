@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import QRCode from "qrcode";
-import { supabase, rpc, run } from "../supabase.js";
+import { supabase, rpc, run, api } from "../supabase.js";
 import { Resource } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, DateText, StatusBadge, Field, Badge, Select, go, Loading, goBack, confirmDialog } from "../ui.jsx";
 import * as L from "../lookups.js";
@@ -123,7 +123,33 @@ export function Invoices() {
 /* ── invoice editor / viewer ─────────────────────────────────────────── */
 const blank = (tax) => ({ item_id: null, description: "", quantity: 1, unit_price: 0, discount: 0, tax_code_id: tax || null });
 
+/**
+ * After issuing: phase 2 (company onboarded) → the server signs and clears /
+ * reports with ZATCA; otherwise phase 1 here in the browser (XML, hash, QR).
+ * @returns {{ phase, status?, messages?, retry? }}
+ */
 async function zatcaProcess(id) {
+  const st = await rpc("zatca_onboarding_status").catch(() => null);
+  if (st?.active) {
+    const r2 = await api("/api/zatca/submit", { invoice_id: id });
+    if (r2.phase === 2 || r2.legacy) return r2;
+  }
+  await zatcaPhase1(id);
+  return { phase: 1 };
+}
+
+/** human message for the toast after issuing / resubmitting */
+export function zatcaMessage(r, t) {
+  if (!r || r.phase === 1) return { kind: "ok", text: t("تم إصدار الفاتورة\nتولّد رمز QR وبصمة ZATCA وتم ترحيل القيد. يمكنك الآن تنزيل PDF أو مشاركتها.", "Invoice issued") };
+  const msgs = (r.messages || []).map((m) => `${m.code}: ${m.message}`).slice(0, 4).join("\n");
+  if (r.status === "cleared") return { kind: "ok", text: t("تم إصدار الفاتورة واعتمادها من زاتكا ✓\nأصبحت جاهزة للمشاركة مع العميل.", "Issued and cleared by ZATCA") };
+  if (r.status === "reported") return { kind: "ok", text: t("تم إصدار الفاتورة والإبلاغ عنها لزاتكا ✓", "Issued and reported to ZATCA") };
+  if (r.status === "warning") return { kind: "ok", text: t(`قبلت زاتكا الفاتورة مع تنبيهات:\n${msgs}`, `Accepted by ZATCA with warnings:\n${msgs}`) };
+  if (r.status === "rejected") return { kind: "bad", text: t(`رفضت زاتكا الفاتورة:\n${msgs}\nصحّح البيانات وأصدر فاتورة جديدة.`, `Rejected by ZATCA:\n${msgs}`) };
+  return { kind: "bad", text: t("صدرت الفاتورة لكن تعذّر الوصول لزاتكا الآن\nسيُعاد الإرسال تلقائياً، أو اضغط «إعادة الإرسال لزاتكا» من صفحة الفاتورة.", "Issued, but ZATCA could not be reached — it will be retried") };
+}
+
+async function zatcaPhase1(id) {
   const inv = await run(supabase.from("invoices").select("*").eq("id", id).single());
   const lines = await run(supabase.from("invoice_lines").select("*, tax_codes(exemption_code, exemption_reason)").eq("invoice_id", id).order("line_no"));
   const seller = await run(supabase.from("organizations").select("*").eq("id", inv.org_id).single());
@@ -137,7 +163,7 @@ async function zatcaProcess(id) {
 }
 
 export function InvoiceEditor({ params }) {
-  const { t, can, org, lang } = useApp();
+  const { t, can, org, lang, notify } = useApp();
   const isNew = params.id === "new";
   const [act, busy] = useAction();
   const v = useIssues();
@@ -249,12 +275,14 @@ export function InvoiceEditor({ params }) {
     if (!v.check(problems(true))) return;
     if (!await confirmDialog(t("إصدار الفاتورة؟ بعد الإصدار لا يمكن تعديلها (التصحيح بإشعار دائن/مدين فقط).",
                           "Issue the invoice? It becomes immutable (corrections via credit/debit notes only)."))) return;
+    let zr = null;
     const id = await act(async () => {
       const id = await save();
       await rpc("issue_invoice", { p_invoice: id });
-      await zatcaProcess(id);
+      zr = await zatcaProcess(id);
       return id;
-    }, t("تم إصدار الفاتورة\nتولّد رمز QR وبصمة ZATCA وتم ترحيل القيد. يمكنك الآن تنزيل PDF أو مشاركتها.", "Invoice issued, QR and ZATCA hash generated"));
+    });
+    if (id) { const m = zatcaMessage(zr, t); notify(m.text, m.kind); }
     if (id) { if (isNew) go(`/sales/invoices/${id}`); else { setForm(null); inv.reload(); } }
   }
   async function onDelete() {
@@ -342,7 +370,7 @@ export function InvoiceEditor({ params }) {
 }
 
 function InvoiceView({ inv, reload }) {
-  const { t, can, org } = useApp();
+  const { t, can, org, notify } = useApp();
   const [act, busy] = useAction();
   const [qrImg, setQrImg] = useState(null);
   const docRef = useRef(null);
@@ -373,8 +401,10 @@ function InvoiceView({ inv, reload }) {
     <>
       <PageHead title={`${titles[inv.doc_type]} ${inv.number}`} sub={<span className="row"><StatusBadge status="issued" />{payState(inv) && <StatusBadge status={payState(inv)} />}</span>}>
         <button className="btn no-print" onClick={() => goBack("/sales/invoices")}>{t("رجوع", "Back")}</button>
-        {!inv.zatca_hash && can("sales.issue") && <button className="btn accent no-print" disabled={busy}
-          onClick={async () => { if (await act(async () => { await zatcaProcess(inv.id); return true; }, t("تمت معالجة ZATCA", "ZATCA processed"))) reload(); }}>{t("إعادة معالجة ZATCA", "Retry ZATCA")}</button>}
+        {(!inv.zatca_hash || (inv.zatca_status === "not_submitted" && String(inv.zatca_xml || "").includes("<ext:UBLExtensions>"))) && can("sales.issue") &&
+          <button className="btn accent no-print" disabled={busy} onClick={async () => {
+            const r = await act(() => zatcaProcess(inv.id));
+            if (r) { const m = zatcaMessage(r, t); notify(m.text, m.kind); reload(); } }}>{t("إعادة الإرسال لزاتكا", "Resend to ZATCA")}</button>}
         {inv.zatca_xml && <button className="btn no-print" onClick={downloadXml}>{t("تنزيل XML", "Download XML")}</button>}
         {inv.doc_type === "invoice" && can("sales.manage") && <button className="btn no-print" onClick={() => go(`/sales/invoices/new?doc=credit_note&ref=${inv.id}&customer=${inv.customer_id || ""}`)}>{t("إشعار دائن", "Credit note")}</button>}
         {balance > 0 && inv.doc_type !== "credit_note" && can("finance.manage") && <button className="btn no-print" onClick={() => go(`/finance/payments?invoice=${inv.id}`)}>{t("تسجيل تحصيل", "Record receipt")}</button>}
@@ -386,7 +416,11 @@ function InvoiceView({ inv, reload }) {
       <div className="grid c2 no-print" style={{ marginTop: 16 }}>
         <Panel title="ZATCA">
           <div className="grid" style={{ gap: 6 }}>
-            <div>{t("الحالة", "Status")}: <StatusBadge status={inv.zatca_status} /></div>
+            <div>{t("الحالة", "Status")}: <StatusBadge status={inv.zatca_status} />
+              {inv.zatca_response?.environment && inv.zatca_response.environment !== "production" && <span className="muted"> ({t("بيئة اختبار", "test environment")}: {inv.zatca_response.environment})</span>}</div>
+            {(inv.zatca_response?.messages || []).length > 0 && <ul className={inv.zatca_status === "rejected" ? "neg" : "muted"} style={{ margin: 0, paddingInlineStart: 18, fontSize: 12 }}>
+              {inv.zatca_response.messages.map((m, i) => <li key={i}><b>{m.code}</b>: {m.message}</li>)}</ul>}
+            {inv.zatca_status === "rejected" && <div className="alert bad" style={{ margin: 0 }}>{t("رفضت زاتكا هذه الفاتورة فلا يُعتد بها. صحّح البيانات المذكورة وأصدر فاتورة جديدة.", "ZATCA rejected this invoice. Fix the data and issue a new invoice.")}</div>}
             <div>UUID: <span className="mono">{inv.zatca_uuid}</span></div>
             <div>ICV: <span className="mono">{inv.zatca_icv}</span></div>
             <div>{t("بصمة الفاتورة", "Invoice hash")}: <span className="mono" style={{ wordBreak: "break-all" }}>{inv.zatca_hash || "—"}</span></div>

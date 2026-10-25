@@ -10,6 +10,7 @@ import * as Y from "./screens/payroll.jsx";
 import * as C from "./screens/settings.jsx";
 import * as R from "./screens/reports.jsx";
 import { OrgChart } from "./screens/orgchart.jsx";
+import { Zatca } from "./screens/zatca.jsx";
 
 export const NAV = [
   { group: ["الرئيسية", "Home"], items: [
@@ -53,6 +54,7 @@ export const NAV = [
   ]},
   { group: ["الإعدادات", "Settings"], items: [
     { path: "/settings/company", label: ["بيانات الشركة", "Company"], perm: "settings.manage", component: C.Company },
+    { path: "/settings/zatca", label: ["الربط مع زاتكا", "ZATCA integration"], perm: "settings.manage", component: Zatca },
     { path: "/settings/users", label: ["المستخدمون والصلاحيات", "Users & roles"], perm: "users.manage", component: C.Users },
     { path: "/settings/integrations", label: ["الربط والتكامل (API)", "Integrations (API)"], perm: "integrations.manage", component: C.Integrations },
     { path: "/settings/audit", label: ["سجل التدقيق", "Audit log"], perm: "audit.view", component: C.Audit },
