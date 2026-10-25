@@ -64,7 +64,9 @@ export default async function handler(req, res) {
 
     // 2. compliance checks: six signed sample documents
     const cert = Buffer.from(compliance.token, "base64").toString();
-    const buyer = { name_ar: "عميل اختبار الامتثال", vat_number: "300000000000003", street: "طريق الملك فهد", building_no: "1111",
+    // the sample buyer's VAT number must differ from the seller's (BR-CUSTOM-VALIDATION-01)
+    const buyerVat = org.vat_number === "311111111111113" ? "300000000000003" : "311111111111113";
+    const buyer = { name_ar: "عميل اختبار الامتثال", vat_number: buyerVat, street: "طريق الملك فهد", building_no: "1111",
                     district: "العليا", city: "الرياض", postal_code: "12211", country: "SA" };
     const line = { description: "اختبار الامتثال", quantity: 1, unit_price: 100, discount: 0, tax_category: "S", tax_rate: 15,
                    line_net: 100, line_vat: 15, line_total: 115 };
