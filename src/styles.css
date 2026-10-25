@@ -293,3 +293,11 @@ tr.invalid td { background: #fff6f5; }
 .toast-detail { font-weight: 400; font-size: 13px; opacity: .92; margin-top: 3px; white-space: pre-line; }
 .toast-x { position: absolute; top: 4px; inset-inline-end: 6px; background: none; border: 0; color: inherit; font-size: 16px; cursor: pointer; opacity: .8; }
 .confirm-msg { margin: 0; line-height: 1.8; white-space: pre-line; font-size: 15px; }
+.org-node.editable { cursor: pointer; }
+.org-node.editable:hover { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+.org-type { font-size: 10px; font-weight: 700; letter-spacing: .02em; color: var(--muted); text-transform: uppercase; }
+.org-node.t-sector { border-top-color: #111; background: #fffdf3; }
+.org-node.t-general_department { border-top-color: var(--accent); }
+.org-node.t-department { border-top-color: var(--brand); }
+.org-node.t-section { border-top-color: #6b8db5; }
+.org-node.t-unit { border-top-color: #9aa6b2; }

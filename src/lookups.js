@@ -31,7 +31,7 @@ export async function items() {
   return (await run(supabase.from("items").select("*").eq("active", true).order("name_ar"))).map((r) => ({ ...r, label: label(r) }));
 }
 export async function departments() {
-  return (await run(supabase.from("departments").select("*").order("name_ar"))).map((r) => ({ ...r, label: r.name_ar }));
+  return (await run(supabase.from("departments").select("*").order("name_ar"))).map((r) => ({ ...r, label: r.code ? `${r.code} — ${r.name_ar}` : r.name_ar }));
 }
 export async function employees() {
   return ((await rpc("lookup_employees")) || [])

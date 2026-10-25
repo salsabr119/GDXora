@@ -183,9 +183,25 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
     return f && !f.required && f.type !== "date";
   }));
 
-  async function template() {
+  // upsert screens (cfg.importKey, e.g. ["code", "national_id"]): a row whose key matches an existing record updates it
+  const keys = cfg.importKey || [];
+  const asRow = (r) => (cfg.toImport ? cfg.toImport(r, lookups || {}) : cfg.toForm ? cfg.toForm(r) : r);
+  const norm = (x) => String(x ?? "").trim().toLowerCase();
+  const findExisting = (rec) => {
+    for (const k of keys) {
+      const val = norm(rec[k]);
+      if (!val) continue;
+      const hit = existing.find((e) => norm(asRow(e)[k]) === val);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const same = (a, b) => (typeof a === "number" || typeof b === "number" ? Number(a) === Number(b) : norm(a) === norm(b));
+
+  async function template(withData) {
     const { downloadTemplate } = await import("./lib/excel.js");
-    await act(() => downloadTemplate({ name: `${cfg.title} - ${t("قالب الاستيراد", "import template")}`, entity: cfg.table, fields, lookups, t,
+    await act(() => downloadTemplate({ name: `${cfg.title} - ${withData ? t("البيانات الحالية", "current data") : t("قالب الاستيراد", "import template")}`,
+                                       entity: cfg.table, fields, lookups, t, rows: withData ? existing.map(asRow) : [],
                                        rtl: document.documentElement.dir !== "ltr" }).then(() => true));
   }
 
@@ -204,17 +220,28 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
       const taken = new Set(existing.map((r) => String(r.code ?? "").trim().toLowerCase()).filter(Boolean));
       const rows = wb.rows.map(({ line, cells }) => {
         const { record, errors, failed } = convertRow(cells, fields, lookups, t);
+        const match = keys.length ? findExisting(record) : null;
+        if (match) {
+          // update: only the cells that differ from the current data; empty cells leave the value as it is
+          const cur = asRow(match);
+          const changed = Object.keys(record).filter((k) => !same(record[k], cur[k]));
+          const merged = { ...cur, ...record };
+          errors.push(...validateRecord(fields.filter((f) => !failed.has(f.key)), merged, t).map((e) => e.msg));
+          if (cfg.validate) errors.push(...cfg.validate(merged, t).map((e) => (typeof e === "string" ? e : e.msg)));
+          return { line, op: changed.length ? "update" : "same", changed: changed.map((k) => fields.find((f) => f.key === k)?.label || k),
+                   record: { id: match.id, ...Object.fromEntries(changed.map((k) => [k, record[k]])) }, show: merged, errors: [...new Set(errors)] };
+        }
         const full = { ...defaults, ...record };
         // a value that could not be read was already reported — don't also call it "required"
         errors.push(...validateRecord(fields.filter((f) => !failed.has(f.key)), full, t).map((e) => e.msg));
         if (cfg.validate) errors.push(...cfg.validate(full, t).map((e) => (typeof e === "string" ? e : e.msg)));
         const code = String(full.code ?? "").trim().toLowerCase();
-        if (code) {
+        if (code) {   // rows that matched an existing record were handled above as updates
           if (taken.has(code)) errors.push(t(`الرمز «${full.code}» موجود مسبقاً في النظام`, `Code "${full.code}" already exists`));
           else if (codes.has(code)) errors.push(t(`الرمز «${full.code}» مكرر في الملف (سطر ${codes.get(code)})`, `Code "${full.code}" is repeated in the file (row ${codes.get(code)})`));
           else codes.set(code, line);
         }
-        return { line, record: full, errors: [...new Set(errors)] };
+        return { line, op: "new", record: full, show: full, errors: [...new Set(errors)] };
       });
       setResult({ file: file.name, rows });
       return true;
@@ -224,24 +251,28 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
 
   const bad = result?.rows.filter((r) => r.errors.length) || [];
   const good = (result?.rows.length || 0) - bad.length;
+  const count = (op) => result?.rows.filter((r) => r.op === op).length || 0;
 
   async function commit() {
     if (!result) { v.check([t("اختر ملف Excel أولاً", "Choose an Excel file first")]); return; }
     if (!v.check(bad.slice(0, 200).flatMap((r) => r.errors.map((e) => t(`سطر ${r.line}: ${e}`, `Row ${r.line}: ${e}`))))) return;
-    if (!await confirmDialog(t(`استيراد ${result.rows.length} سجل إلى «${cfg.title}»؟\nستُضاف كلها دفعة واحدة.`, `Import ${result.rows.length} records into "${cfg.title}"?`))) return;
+    const todo = result.rows.filter((r) => r.op !== "same");
+    if (!todo.length) { v.check([t("لا توجد تغييرات في الملف مقارنة بالبيانات الحالية", "The file has no changes compared with the current data")]); return; }
+    const parts = [count("new") && t(`إضافة ${count("new")}`, `add ${count("new")}`), count("update") && t(`تحديث ${count("update")}`, `update ${count("update")}`)].filter(Boolean).join(t(" و", " and "));
+    if (!await confirmDialog(t(`${parts} في «${cfg.title}»؟\nيُحفظ كل شيء دفعة واحدة.`, `${parts} in "${cfg.title}"?`))) return;
     const ok = await act(async () => {
       // one request → one statement: either every row is saved or none is
-      const records = result.rows.map((r) => r.record);
+      const records = todo.map((r) => r.record);
       if (cfg.saveRecords) await cfg.saveRecords(records);
       else await run(supabase.from(cfg.table).insert(records, { defaultToNull: false }));
       return true;
-    }, t(`تم استيراد ${result.rows.length} سجل\nتظهر الآن في قائمة «${cfg.title}».`, `Imported ${result.rows.length} records`));
+    }, t(`تم الحفظ: ${[count("new") && `${count("new")} جديد`, count("update") && `${count("update")} محدّث`].filter(Boolean).join("، ")}\nتظهر الآن في قائمة «${cfg.title}».`, "Saved"));
     if (ok) onDone();
   }
 
   const preview = fields.slice(0, 5);
   const show = (f, r) => {
-    const x = r.record[f.key];
+    const x = (r.show || r.record)[f.key];
     if (x === undefined || x === null) return "";
     if (f.type === "select") { const opts = typeof f.options === "function" ? f.options(lookups || {}, r.record) : f.options || []; return opts.find((o) => o.id === x)?.label ?? x; }
     if (f.type === "checkbox") return x ? t("نعم", "Yes") : t("لا", "No");
@@ -254,11 +285,14 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
              <span style={{ flex: 1 }} />
              <button className="btn" onClick={onClose}>{t("إلغاء", "Cancel")}</button>
              <button className="btn primary" onClick={commit} disabled={busy}>
-               {result ? t(`تأكيد استيراد ${result.rows.length} سجل`, `Import ${result.rows.length} records`) : t("تأكيد الاستيراد", "Import")}</button>
+               {result ? t(`تأكيد (${result.rows.filter((r) => r.op !== "same").length} سجل)`, `Confirm (${result.rows.filter((r) => r.op !== "same").length})`) : t("تأكيد الاستيراد", "Import")}</button>
            </>}>
       <ol className="steps">
         <li>{t("نزّل القالب — الأعمدة المعلّمة بـ * إلزامية، والقوائم المنسدلة جاهزة.", "Download the template — columns marked * are required; dropdowns are ready.")}
-          {" "}<button className="btn sm" onClick={template} disabled={busy}>⬇ {t("تنزيل القالب", "Download template")}</button></li>
+          {" "}<button className="btn sm" onClick={() => template(false)} disabled={busy}>⬇ {t("تنزيل القالب", "Download template")}</button>
+          {keys.length > 0 && <>{" "}<button className="btn sm" onClick={() => template(true)} disabled={busy || !existing.length}>⬇ {t("تنزيل البيانات الحالية للتعديل", "Download current data to edit")}</button>
+            <div className="muted" style={{ fontSize: 12, marginTop: 4 }}>{t("عدّل على البيانات الحالية وارفعها: السطر الموجود يُحدَّث، والجديد يُضاف. الخلية الفارغة لا تغيّر القيمة الحالية.",
+              "Edit the current data and upload it: existing rows are updated, new ones added. An empty cell keeps the current value.")}</div></>}</li>
         <li>{t("عبّئ البيانات (سطر لكل سجل) واحفظ الملف.", "Fill one row per record and save the file.")}</li>
         <li>{t("ارفع الملف وراجع المعاينة. لن يُحفظ أي شيء حتى تكون كل الأسطر سليمة.", "Upload it and review the preview. Nothing is saved until every row is valid.")}
           <div style={{ marginTop: 6 }}><input ref={fileRef} type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -269,15 +303,17 @@ export function ImportDialog({ cfg, lookups, existing, onClose, onDone }) {
         <>
           <div className={`alert ${bad.length ? "bad" : "ok"}`}>
             {t(`${result.file}: ${result.rows.length} سطر — ${good} سليم`, `${result.file}: ${result.rows.length} rows — ${good} valid`)}
+            {keys.length > 0 && t(` (جديد ${count("new")} · تحديث ${count("update")} · بدون تغيير ${count("same")})`, ` (new ${count("new")} · update ${count("update")} · unchanged ${count("same")})`)}
             {bad.length > 0 && t(`، ${bad.length} فيه أخطاء (موضّحة بالأحمر)`, `, ${bad.length} with errors (in red)`)}
           </div>
           <div className="tbl-wrap" style={{ maxHeight: 360 }}>
             <table className="tbl">
-              <thead><tr><th>{t("سطر", "Row")}</th>{preview.map((f) => <th key={f.key}>{f.label}</th>)}<th>{t("الحالة", "Status")}</th></tr></thead>
+              <thead><tr><th>{t("سطر", "Row")}</th>{preview.map((f) => <th key={f.key}>{f.label}</th>)}{keys.length > 0 && <th>{t("العملية", "Action")}</th>}<th>{t("الحالة", "Status")}</th></tr></thead>
               <tbody>{result.rows.slice(0, 300).map((r) => (
                 <tr key={r.line} className={r.errors.length ? "invalid" : ""}>
                   <td className="mono">{r.line}</td>
                   {preview.map((f) => <td key={f.key}>{show(f, r)}</td>)}
+                  {keys.length > 0 && <td>{r.op === "new" ? t("جديد", "New") : r.op === "update" ? <span title={r.changed.join("، ")}>{t("تحديث", "Update")}: {r.changed.join("، ")}</span> : <span className="muted">{t("بدون تغيير", "Unchanged")}</span>}</td>}
                   <td>{r.errors.length ? <span className="neg">{r.errors.join(" · ")}</span> : "✓"}</td>
                 </tr>))}
               </tbody>
