@@ -3,6 +3,7 @@
 // scaled down on narrow screens.
 import { forwardRef, useEffect, useRef, useState } from "react";
 import { amountInArabicWords } from "../lib/tafqeet.js";
+import { letterheadStyle } from "../lib/letterhead.js";
 
 const L = ({ ar, en }) => <span className="bi"><span>{ar}</span><small dir="ltr">{en}</small></span>;
 // document amounts: always Latin digits with thousands separators
@@ -18,15 +19,17 @@ export const TITLES = {
 };
 export const docTitle = (inv) => (inv.doc_type === "invoice" ? TITLES[inv.invoice_kind] : TITLES[inv.doc_type]);
 
-export const InvoiceDocument = forwardRef(function InvoiceDocument({ inv, org, qrImg }, ref) {
+// letterhead: the company's blank A4 (org_letterhead) — drawn behind the page, replacing the logo and contact footer;
+// the seller's name, VAT number and address stay on the invoice as ZATCA requires
+export const InvoiceDocument = forwardRef(function InvoiceDocument({ inv, org, qrImg, letterhead }, ref) {
   const c = inv.customers;
   const title = docTitle(inv);
   const cur = inv.currency === "SAR" || !inv.currency ? "ر.س" : inv.currency;
   return (
-    <div className="a4" ref={ref} dir="rtl">
+    <div className={`a4 ${letterhead ? "lh" : ""}`} ref={ref} dir="rtl" style={letterheadStyle(letterhead)}>
       <header className="a4-head">
         <div className="a4-org">
-          {org.logo_data && <img className="a4-logo" src={org.logo_data} alt="" />}
+          {org.logo_data && !letterhead && <img className="a4-logo" src={org.logo_data} alt="" />}
           <div>
             <div className="a4-org-name">{org.legal_name || org.name_ar}</div>
             {org.name_en && <div className="a4-org-en">{org.name_en}</div>}
@@ -119,10 +122,12 @@ export const InvoiceDocument = forwardRef(function InvoiceDocument({ inv, org, q
 
       <footer className="a4-foot">
         {org.invoice_footer && <div className="a4-foot-note">{org.invoice_footer}</div>}
-        <div className="a4-contact">
-          {[org.phone, org.email, org.website].filter(Boolean).map((x) => <span key={x} className="ltr">{x}</span>)}
-        </div>
-        <div className="a4-gen">GDXora · Global Drive IT Solutions</div>
+        {!letterhead && <>
+          <div className="a4-contact">
+            {[org.phone, org.email, org.website].filter(Boolean).map((x) => <span key={x} className="ltr">{x}</span>)}
+          </div>
+          <div className="a4-gen">GDXora · Global Drive IT Solutions</div>
+        </>}
       </footer>
     </div>
   );

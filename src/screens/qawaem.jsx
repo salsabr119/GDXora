@@ -6,6 +6,7 @@ import { rpc } from "../supabase.js";
 import { useApp, useData, PageHead, Panel, Tabs, Loading, Badge, go } from "../ui.jsx";
 import { PAGES, SOCE_COLUMNS, SOCE_ROWS, LANDING, INPUTS, flatten, plain, fmt } from "../lib/qawaem.js";
 import { A4Viewer } from "./InvoiceDocument.jsx";
+import { useLetterhead, letterheadStyle } from "../lib/letterhead.js";
 
 const thisYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 6 }, (_, i) => thisYear - i);
@@ -155,17 +156,18 @@ function Checks({ checks, rounding }) {
 export const QawaemDocument = forwardRef(function QawaemDocument({ r, org, viewer }, ref) {
   const name = org.legal_name || org.name_ar;
   const end = `${r.year}-12-31`;
+  const lh = useLetterhead();
   const Page = ({ title, children }) => {
     const page = (
-      <div className="a4 qd" dir="rtl">
+      <div className={`a4 qd ${lh ? "lh" : ""}`} dir="rtl" style={letterheadStyle(lh)}>
         <header className="qd-head">
-          <div className="a4-org-name">{name}</div>
-          {org.cr_number && <div className="a4-meta">سجل تجاري رقم <b className="ltr">{org.cr_number}</b></div>}
+          {!lh && <div className="a4-org-name">{name}</div>}
+          {!lh && org.cr_number && <div className="a4-meta">سجل تجاري رقم <b className="ltr">{org.cr_number}</b></div>}
           <div className="qd-title">{title}</div>
           <div className="muted">للسنة المنتهية في <span className="ltr">{end}</span> — المبالغ بالريال السعودي</div>
         </header>
         {children}
-        <footer className="a4-foot"><div className="a4-gen">GDXora · Global Drive IT Solutions</div></footer>
+        {!lh && <footer className="a4-foot"><div className="a4-gen">GDXora · Global Drive IT Solutions</div></footer>}
       </div>);
     return viewer ? <A4Viewer>{page}</A4Viewer> : page;
   };

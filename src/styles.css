@@ -329,3 +329,8 @@ tr.invalid td { background: #fff6f5; }
 .qd-notes { padding-inline-start: 18px; display: grid; gap: 10px; line-height: 1.8; }
 .qd-p { line-height: 2; margin: 0; }
 .qd-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 30px; }
+
+/* ── letterhead: the company's blank A4 behind every page ── */
+.a4.lh::before { display: none; }
+.a4.lh { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.a4.lh .a4-head { border-bottom-width: 1px; }

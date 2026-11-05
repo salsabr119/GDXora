@@ -8,6 +8,7 @@ import { processInvoice } from "../lib/zatca/index.js";
 import { today, num, isVatNumber } from "../lib/format.js";
 import { InvoiceDocument, A4Viewer, docTitle } from "./InvoiceDocument.jsx";
 import { nodeToPdf, downloadBlob, shareOrDownload } from "../lib/pdf.js";
+import { useLetterhead } from "../lib/letterhead.js";
 
 /* ── customers ───────────────────────────────────────────────────────── */
 export function Customers() {
@@ -374,6 +375,7 @@ function InvoiceView({ inv, reload }) {
   const [act, busy] = useAction();
   const [qrImg, setQrImg] = useState(null);
   const docRef = useRef(null);
+  const letterhead = useLetterhead();
   useEffect(() => {
     if (inv.zatca_qr) QRCode.toDataURL(inv.zatca_qr, { margin: 1, width: 300, errorCorrectionLevel: "M" }).then(setQrImg).catch(() => setQrImg(null));
   }, [inv.zatca_qr]);
@@ -412,7 +414,7 @@ function InvoiceView({ inv, reload }) {
         <button className="btn no-print" onClick={onShare} disabled={busy}>{t("مشاركة", "Share")}</button>
         <button className="btn primary no-print" onClick={onPdf} disabled={busy}>{busy ? t("جارِ التجهيز…", "Preparing…") : t("تنزيل PDF", "Download PDF")}</button>
       </PageHead>
-      <A4Viewer><InvoiceDocument ref={docRef} inv={inv} org={org} qrImg={qrImg} /></A4Viewer>
+      <A4Viewer><InvoiceDocument ref={docRef} inv={inv} org={org} qrImg={qrImg} letterhead={letterhead} /></A4Viewer>
       <div className="grid c2 no-print" style={{ marginTop: 16 }}>
         <Panel title="ZATCA">
           <div className="grid" style={{ gap: 6 }}>

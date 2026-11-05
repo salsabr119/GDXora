@@ -64,6 +64,7 @@ export function Company() {
           </div>
         </div>
       </Panel>
+      <LetterheadPanel />
       <Issues issues={iss.issues} />
       <Panel><form id="org" onSubmit={save} noValidate><RecordForm fields={fields} value={f} onChange={setF} invalid={iss.has} /></form></Panel>
       <Panel title={t("الفوترة الإلكترونية (ZATCA)", "E-invoicing (ZATCA)")}>
@@ -76,6 +77,80 @@ export function Company() {
         </div>
       </Panel>
     </>
+  );
+}
+
+/* ── letterhead: the blank A4 every document is printed on ───────────── */
+function LetterheadPanel() {
+  const { t } = useApp();
+  const [act, busy] = useAction();
+  const iss = useIssues();
+  const d = useData(() => run(supabase.from("org_letterhead").select("*").maybeSingle()), []);
+  const [lh, setLh] = useState(null);      // edited copy; null until loaded or chosen
+  const cur = lh || d.data;
+  const set = (patch) => setLh({ ...(cur || { top_mm: 40, bottom_mm: 25, side_mm: 15 }), ...patch });
+
+  async function onFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (file.size > 15e6) { iss.check([t("الملف كبير — الحد 15 ميجابايت", "The file is too large — 15 MB at most")]); return; }
+    const { fileToLetterhead } = await import("../lib/letterhead.js");
+    const data = await act(() => fileToLetterhead(file));
+    if (data) { iss.clear(); set({ image_data: data }); }
+  }
+  async function save() {
+    const out = [];
+    if (!cur?.image_data) out.push(t("اختر ملف الورق الرسمي (PDF أو صورة) أولاً", "Choose the letterhead file (PDF or image) first"));
+    const range = (k, lo, hi, label) => { const v = Number(cur?.[k]); if (!(v >= lo && v <= hi)) out.push({ key: k, msg: t(`${label} بين ${lo} و ${hi} ملم`, `${label} must be ${lo}–${hi} mm`) }); };
+    if (cur) { range("top_mm", 0, 120, t("الهامش العلوي", "Top margin")); range("bottom_mm", 0, 120, t("الهامش السفلي", "Bottom margin")); range("side_mm", 5, 50, t("الهامش الجانبي", "Side margin")); }
+    if (!iss.check(out)) return;
+    const row = { image_data: cur.image_data, top_mm: Number(cur.top_mm), bottom_mm: Number(cur.bottom_mm), side_mm: Number(cur.side_mm) };
+    const ok = await act(async () => {
+      await run(d.data ? supabase.from("org_letterhead").update(row).eq("org_id", getOrg()) : supabase.from("org_letterhead").insert(row));
+      return true;
+    }, t("تم حفظ الورق الرسمي\nيظهر الآن في الفواتير والقوائم المالية وكل المستندات المطبوعة.", "Letterhead saved"));
+    if (ok) { (await import("../lib/letterhead.js")).forgetLetterhead(); setLh(null); d.reload(); }
+  }
+  async function remove() {
+    if (!await confirmDialog(t("إزالة الورق الرسمي؟\nترجع المستندات للتصميم الافتراضي بشعار الشركة.", "Remove the letterhead? Documents go back to the default design."))) return;
+    const ok = await act(async () => { await run(supabase.from("org_letterhead").delete().eq("org_id", getOrg())); return true; }, t("أُزيل الورق الرسمي", "Letterhead removed"));
+    if (ok) { (await import("../lib/letterhead.js")).forgetLetterhead(); setLh(null); d.reload(); }
+  }
+  const scale = 0.32;   // preview size of the A4 page
+  const mm = (794 / 210) * scale;
+  return (
+    <Panel title={t("الورق الرسمي للمستندات", "Document letterhead")}>
+      <Issues issues={iss.issues} />
+      <div className="row" style={{ gap: 20, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ width: 794 * scale, height: 1123 * scale, position: "relative", border: "1px solid var(--line)", background: "#fff", flex: "none",
+                      backgroundImage: cur?.image_data ? `url(${cur.image_data})` : undefined, backgroundSize: "100% 100%" }}>
+          {!cur?.image_data && <div className="muted" style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", fontSize: 12, textAlign: "center", padding: 8 }}>
+            {t("بدون ورق رسمي — المستندات بالتصميم الافتراضي", "No letterhead — documents use the default design")}</div>}
+          {cur?.image_data && <div title={t("مساحة المحتوى", "Content area")} style={{ position: "absolute", border: "1.5px dashed #2563eb", background: "rgba(37,99,235,.06)",
+            top: Number(cur.top_mm) * mm, bottom: Number(cur.bottom_mm) * mm, left: Number(cur.side_mm) * mm, right: Number(cur.side_mm) * mm }} />}
+        </div>
+        <div className="grid" style={{ gap: 10, flex: 1, minWidth: 240 }}>
+          <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>{t(
+            "ارفع صفحة A4 فارغة بتصميم شركتكم (الهيدر والفوتر والشعار) بصيغة PDF أو صورة. تُطبع عليها الفواتير والقوائم المالية وعروض الأسعار وكل المستندات، ويكتب النظام المحتوى داخل المربع الأزرق. عدّل الهوامش حتى لا يغطي المحتوى الهيدر أو الفوتر.",
+            "Upload a blank A4 page in your company design (header, footer, logo) as a PDF or image. Invoices, statements, quotations and every document are printed on it, with the content inside the blue box. Adjust the margins so the content stays clear of the header and footer.")}</div>
+          <label className="btn">{t("اختيار ملف (PDF أو صورة)…", "Choose file (PDF or image)…")}
+            <input type="file" accept="application/pdf,image/png,image/jpeg,image/webp" hidden onChange={onFile} disabled={busy} /></label>
+          {cur?.image_data && <>
+            <div className="form">
+              <Field label={t("الهامش العلوي (ملم)", "Top margin (mm)")} invalid={iss.has("top_mm")}><input className="num" type="number" step="1" value={cur.top_mm ?? ""} onChange={(e) => set({ top_mm: e.target.value })} /></Field>
+              <Field label={t("الهامش السفلي (ملم)", "Bottom margin (mm)")} invalid={iss.has("bottom_mm")}><input className="num" type="number" step="1" value={cur.bottom_mm ?? ""} onChange={(e) => set({ bottom_mm: e.target.value })} /></Field>
+              <Field label={t("الهامش الجانبي (ملم)", "Side margin (mm)")} invalid={iss.has("side_mm")}><input className="num" type="number" step="1" value={cur.side_mm ?? ""} onChange={(e) => set({ side_mm: e.target.value })} /></Field>
+            </div>
+            <div className="row" style={{ gap: 8 }}>
+              <button className="btn primary" onClick={save} disabled={busy}>{t("حفظ الورق الرسمي", "Save letterhead")}</button>
+              {d.data && <button className="btn danger" onClick={remove} disabled={busy}>{t("إزالة", "Remove")}</button>}
+              {lh && <button className="btn" onClick={() => { setLh(null); iss.clear(); }} disabled={busy}>{t("تراجع", "Undo")}</button>}
+            </div>
+          </>}
+        </div>
+      </div>
+    </Panel>
   );
 }
 
