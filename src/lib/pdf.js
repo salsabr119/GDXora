@@ -5,21 +5,28 @@
 
 const A4 = { w: 210, h: 297 }; // mm
 
-export async function nodeToPdf(node) {
+export const nodeToPdf = (node) => nodesToPdf([node]);
+
+/** several A4 nodes into one PDF; each node starts on a new page */
+export async function nodesToPdf(nodes) {
   const [{ toCanvas }, { jsPDF }] = await Promise.all([import("html-to-image"), import("jspdf")]);
-  const canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true });
   const pdf = new jsPDF({ unit: "mm", format: "a4", compress: true });
-  const pagePx = Math.floor((canvas.width * A4.h) / A4.w);   // canvas pixels per A4 page
-  for (let y = 0, first = true; y < canvas.height; y += pagePx, first = false) {
-    const h = Math.min(pagePx, canvas.height - y);
-    if (!first && h < pagePx * 0.02) break;     // sub-pixel overflow, not a real page
-    const slice = document.createElement("canvas");
-    slice.width = canvas.width; slice.height = h;
-    const ctx = slice.getContext("2d");
-    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, slice.width, h);
-    ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
-    if (!first) pdf.addPage();
-    pdf.addImage(slice.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, A4.w, (h * A4.w) / canvas.width);
+  let first = true;
+  for (const node of nodes) {
+    const canvas = await toCanvas(node, { pixelRatio: 2, backgroundColor: "#ffffff", cacheBust: true });
+    const pagePx = Math.floor((canvas.width * A4.h) / A4.w);   // canvas pixels per A4 page
+    for (let y = 0, top = true; y < canvas.height; y += pagePx, top = false) {
+      const h = Math.min(pagePx, canvas.height - y);
+      if (!top && h < pagePx * 0.02) break;     // sub-pixel overflow, not a real page
+      const slice = document.createElement("canvas");
+      slice.width = canvas.width; slice.height = h;
+      const ctx = slice.getContext("2d");
+      ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, slice.width, h);
+      ctx.drawImage(canvas, 0, y, canvas.width, h, 0, 0, canvas.width, h);
+      if (!first) pdf.addPage();
+      first = false;
+      pdf.addImage(slice.toDataURL("image/jpeg", 0.92), "JPEG", 0, 0, A4.w, (h * A4.w) / canvas.width);
+    }
   }
   return pdf.output("blob");
 }

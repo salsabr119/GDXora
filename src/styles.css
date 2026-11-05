@@ -301,3 +301,31 @@ tr.invalid td { background: #fff6f5; }
 .org-node.t-department { border-top-color: var(--brand); }
 .org-node.t-section { border-top-color: #6b8db5; }
 .org-node.t-unit { border-top-color: #9aa6b2; }
+
+/* ── Qawaem filing ── */
+.q-lines td { vertical-align: middle; }
+.q-lines .q-no { width: 44px; color: var(--muted); text-align: center; }
+.q-lines .q-copy { width: 44px; text-align: center; }
+.q-lines tr.q-calc td, .q-lines th.q-calc { background: var(--soft); font-weight: 600; }
+.q-lines td.n .btn { margin-inline-start: 4px; }
+.q-checks { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.q-checks li { display: flex; gap: 8px; align-items: baseline; }
+.q-checks li > span { width: 16px; text-align: center; font-weight: 700; }
+.q-checks li.ok > span { color: var(--ok, #1b7f3b); }
+.q-checks li.error { color: var(--bad); font-weight: 600; }
+.q-checks li.warning > span { color: #b7791f; }
+.q-checks li.info { color: var(--muted); }
+.q-offscreen { position: fixed; top: 0; left: -10000px; width: 794px; }
+.qd { gap: 14px; }
+.qd-head { text-align: center; padding-bottom: 12px; border-bottom: 3px solid var(--accent); }
+.qd-title { font-size: 18px; font-weight: 700; margin-top: 8px; }
+.qd-sub { margin: 10px 0 4px; font-size: 14px; }
+.qd-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.qd-table th { background: #111; color: #fff; padding: 6px; font-weight: 600; }
+.qd-table td { padding: 6px 8px; border-bottom: 1px solid #ececec; }
+.qd-table td.n, .qd-table th.n { text-align: left; direction: ltr; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.qd-table tr.qd-total td { font-weight: 700; border-top: 2px solid #111; background: #fafafa; }
+.qd-soce { font-size: 10.5px; }
+.qd-notes { padding-inline-start: 18px; display: grid; gap: 10px; line-height: 1.8; }
+.qd-p { line-height: 2; margin: 0; }
+.qd-sign { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-top: 30px; }

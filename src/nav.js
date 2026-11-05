@@ -11,6 +11,7 @@ import * as C from "./screens/settings.jsx";
 import * as R from "./screens/reports.jsx";
 import { OrgChart } from "./screens/orgchart.jsx";
 import { Zatca } from "./screens/zatca.jsx";
+import { Qawaem } from "./screens/qawaem.jsx";
 
 export const NAV = [
   { group: ["الرئيسية", "Home"], items: [
@@ -51,6 +52,7 @@ export const NAV = [
   ]},
   { group: ["التقارير", "Reports"], items: [
     { path: "/reports", label: ["📊 التقارير", "📊 Reports"], perm: R.REPORT_PERMS, component: R.ReportsHome },
+    { path: "/qawaem", label: ["🏛 الإيداع في قوائم", "🏛 Qawaem filing"], perm: "accounting.view", component: Qawaem },
   ]},
   { group: ["الإعدادات", "Settings"], items: [
     { path: "/settings/company", label: ["بيانات الشركة", "Company"], perm: "settings.manage", component: C.Company },

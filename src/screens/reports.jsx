@@ -464,13 +464,17 @@ export function ReportsHome() {
       <PageHead title={t("التقارير", "Reports")} sub={t("كل تقرير قابل للتصفية والتصدير إلى Excel والطباعة", "Every report can be filtered, exported to Excel and printed")} />
       {GROUPS(t).map((g) => {
         const items = list.filter((r) => r.group === g.id);
+        if (g.id === "finance" && can("accounting.view")) {
+          items.unshift({ key: "qawaem", path: "/qawaem", title: t("🏛 جاهز للإيداع في قوائم", "🏛 Ready to file in Qawaem"),
+                          desc: t("أرقام منصة قوائم بنفس أرقام خاناتها، مع فحص قبل التقديم وملف PDF للقوائم", "Qawaem platform figures by line, checked before filing, with the statements PDF") });
+        }
         if (!items.length) return null;
         return (
           <section key={g.id} style={{ marginBottom: 20 }}>
             <h2 className="section-title" style={{ fontSize: 16 }}>{g.icon} {g.title}</h2>
             <div className="grid c3">
               {items.map((r) => (
-                <button key={r.key} className="panel report-card" onClick={() => go(`/reports/${r.key}`)}>
+                <button key={r.key} className="panel report-card" onClick={() => go(r.path || `/reports/${r.key}`)}>
                   <b>{r.title}</b><span className="muted">{r.desc}</span>
                 </button>
               ))}
