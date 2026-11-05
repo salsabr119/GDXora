@@ -3,7 +3,7 @@ import { supabase, configured, rpc, run, setOrg, getOrg } from "./supabase.js";
 import { AppCtx, useRoute, match, go, useToasts, ErrorBoundary, ConfirmHost } from "./ui.jsx";
 import { NAV, DETAIL_ROUTES } from "./nav.js";
 import { Auth, Onboarding } from "./screens/auth.jsx";
-import { Assistant } from "./assistant.jsx";
+import { Assistant, assistantEnabled, useAssistantHidden } from "./assistant.jsx";
 
 export default function App() {
   const [lang, setLang] = useState(() => { try { return localStorage.getItem("gdx_lang") || "ar"; } catch { return "ar"; } });
@@ -15,6 +15,7 @@ export default function App() {
   const [perms, setPerms] = useState(new Set());
   const [modules, setModules] = useState(new Set());
   const [menuOpen, setMenuOpen] = useState(false);
+  const [assistHidden, setAssistHidden] = useAssistantHidden();
   const path = useRoute();
 
   useEffect(() => {
@@ -118,6 +119,7 @@ export default function App() {
               {orgs.map((o) => <option key={o.org_id} value={o.org_id}>{lang === "en" && o.name_en ? o.name_en : o.name_ar}</option>)}
             </select>
             <span className="grow" />
+            {assistantEnabled(org) && assistHidden && <button className="btn ghost sm" onClick={() => setAssistHidden(false)} title={t("إظهار المساعد", "Show the assistant")}>💬</button>}
             <button className="btn ghost sm" onClick={() => setLang(lang === "ar" ? "en" : "ar")}>{lang === "ar" ? "English" : "العربية"}</button>
             <span className="muted who" style={{ fontSize: 13 }}>{session.user.email}</span>
             <button className="btn sm" onClick={() => { setOrg(null); supabase.auth.signOut(); }}>{t("خروج", "Sign out")}</button>
@@ -127,7 +129,7 @@ export default function App() {
           </div>
         </div>
       </div>
-      <Assistant />
+      {assistantEnabled(org) && !assistHidden && <Assistant onHide={() => setAssistHidden(true)} />}
       {toasts.view}<ConfirmHost />
     </AppCtx.Provider>
   );

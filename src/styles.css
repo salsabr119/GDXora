@@ -353,3 +353,8 @@ tr.invalid td { background: #fff6f5; }
 .assist-input textarea { flex: 1; resize: none; }
 .assist-note { font-size: 11px; color: var(--muted); padding: 0 12px 8px; }
 @media (max-width: 600px) { .assist { inset-inline: 8px; width: auto; bottom: 8px; height: calc(100vh - 80px); } .assist-fab { bottom: 12px; inset-inline-start: 12px; } }
+.assist-fab { display: flex; padding: 0; overflow: hidden; }
+.assist-fab button { background: none; border: none; color: #fff; font: inherit; cursor: pointer; }
+.assist-fab .assist-open { padding: 10px 14px; font-weight: 600; }
+.assist-fab .assist-hide { padding: 10px 10px; border-inline-start: 1px solid rgba(255,255,255,.25); opacity: .8; }
+.assist-fab .assist-hide:hover { opacity: 1; }

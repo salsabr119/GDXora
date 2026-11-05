@@ -6,6 +6,15 @@ import { api } from "./supabase.js";
 import { useApp, useRoute } from "./ui.jsx";
 
 const KEY = "gdx_assistant";
+const HIDE = "gdx_assistant_hidden";
+/** company switch (Settings → Company); on unless turned off */
+export const assistantEnabled = (org) => org?.settings?.assistant_enabled !== false;
+/** this user's own choice to keep the button off their pages */
+export function useAssistantHidden() {
+  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem(HIDE) === "1"; } catch { return false; } });
+  const set = (v) => { setHidden(v); try { v ? localStorage.setItem(HIDE, "1") : localStorage.removeItem(HIDE); } catch { /* private mode */ } };
+  return [hidden, set];
+}
 const load = () => { try { return JSON.parse(sessionStorage.getItem(KEY)) || []; } catch { return []; } };
 const save = (m) => { try { sessionStorage.setItem(KEY, JSON.stringify(m.slice(-20))); } catch { /* private mode */ } };
 
@@ -17,7 +26,7 @@ function Text({ text }) {
     </div>));
 }
 
-export function Assistant() {
+export function Assistant({ onHide }) {
   const { t, lang } = useApp();
   const route = useRoute();
   const [open, setOpen] = useState(false);
@@ -45,7 +54,11 @@ export function Assistant() {
     setBusy(false);
   }
 
-  if (!open) return <button className="assist-fab no-print" onClick={() => setOpen(true)} title={t("المساعد", "Assistant")}>💬 {t("المساعد", "Help")}</button>;
+  if (!open) return (
+    <div className="assist-fab no-print">
+      <button className="assist-open" onClick={() => setOpen(true)} title={t("المساعد", "Assistant")}>💬 {t("المساعد", "Help")}</button>
+      <button className="assist-hide" onClick={onHide} title={t("إخفاء من صفحاتي (يرجع من زر 💬 أعلى الشاشة)", "Hide from my pages (bring it back from 💬 at the top)")} aria-label={t("إخفاء", "Hide")}>✕</button>
+    </div>);
   return (
     <div className="assist no-print" role="dialog" aria-label={t("المساعد", "Assistant")}>
       <div className="assist-head">

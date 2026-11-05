@@ -4,6 +4,7 @@ import { RecordForm, validateRecord } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Badge, Modal, Tabs, Field, DateText, Loading, confirmDialog } from "../ui.jsx";
 import { isVatNumber, isSaIban, today } from "../lib/format.js";
 import { imageFileToDataUrl } from "../lib/pdf.js";
+import { assistantEnabled } from "../assistant.jsx";
 
 /* ── company ─────────────────────────────────────────────────────────── */
 export function Company() {
@@ -65,6 +66,7 @@ export function Company() {
         </div>
       </Panel>
       <LetterheadPanel />
+      <AssistantPanel />
       <Issues issues={iss.issues} />
       <Panel><form id="org" onSubmit={save} noValidate><RecordForm fields={fields} value={f} onChange={setF} invalid={iss.has} /></form></Panel>
       <Panel title={t("الفوترة الإلكترونية (ZATCA)", "E-invoicing (ZATCA)")}>
@@ -77,6 +79,31 @@ export function Company() {
         </div>
       </Panel>
     </>
+  );
+}
+
+/* ── the in-app assistant: on or off for the whole company ──────────── */
+function AssistantPanel() {
+  const { t, org, refreshOrg } = useApp();
+  const [act, busy] = useAction();
+  const on = assistantEnabled(org);
+  async function toggle() {
+    if (!await confirmDialog(on
+      ? t("إيقاف المساعد؟\nيختفي زر «💬 المساعد» من صفحات كل مستخدمي الشركة.", "Turn the assistant off for everyone in the company?")
+      : t("تفعيل المساعد؟\nيظهر زر «💬 المساعد» في صفحات كل مستخدمي الشركة.", "Turn the assistant on for everyone in the company?"))) return;
+    const ok = await act(async () => {
+      await run(supabase.from("organizations").update({ settings: { ...(org.settings || {}), assistant_enabled: !on } }).eq("id", org.id));
+      return true;
+    }, on ? t("تم إيقاف المساعد", "Assistant turned off") : t("تم تفعيل المساعد", "Assistant turned on"));
+    if (ok) refreshOrg();
+  }
+  return (
+    <Panel title={t("💬 المساعد", "💬 Assistant")} actions={<button className={`btn sm ${on ? "" : "primary"}`} onClick={toggle} disabled={busy}>
+      {on ? t("مفعّل — إيقاف", "On — turn off") : t("موقوف — تفعيل", "Off — turn on")}</button>}>
+      <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>{t(
+        "زر في زاوية كل صفحة يجيب عن أسئلة استخدام النظام من دليل المستخدم. لا يطّلع على بيانات الشركة. الإيقاف هنا يزيله لكل المستخدمين، وكل مستخدم يقدر يخفيه من صفحته فقط. يحتاج مفتاح ANTHROPIC_API_KEY في إعدادات Vercel.",
+        "A button on every page that answers how-to questions from the user manual; it doesn't see company data. Turning it off here removes it for everyone; each user can also hide it just for themselves. Needs ANTHROPIC_API_KEY in Vercel.")}</div>
+    </Panel>
   );
 }
 

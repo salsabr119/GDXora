@@ -36,6 +36,9 @@ export default async function handler(req, res) {
     if (req.method !== "POST") throw new HttpError(405, "method not allowed");
     if (!process.env.ANTHROPIC_API_KEY) throw new HttpError(503, "the assistant is not configured (ANTHROPIC_API_KEY)");
     const { user, orgId, admin } = await requireMember(req);
+    // the company can turn the assistant off (Settings → Company)
+    const { data: org } = await admin.from("organizations").select("settings").eq("id", orgId).maybeSingle();
+    if (org?.settings?.assistant_enabled === false) throw new HttpError(403, "the assistant is turned off for this company");
     const body = await readJson(req);
 
     const messages = Array.isArray(body.messages) ? body.messages.slice(-MAX_TURNS) : [];
