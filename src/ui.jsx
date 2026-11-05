@@ -322,6 +322,7 @@ const statusMap = (t) => ({
     paid: ["ok", t("مدفوعة", "Paid")], partial: ["warn", t("مدفوعة جزئياً", "Partially paid")], unpaid: ["", t("غير مدفوعة", "Unpaid")],
     not_submitted: ["", t("لم تُرسل", "Not submitted")], reported: ["ok", t("مُبلّغ عنها", "Reported")],
     cleared: ["ok", t("معتمدة", "Cleared")], warning: ["warn", t("تحذير", "Warning")],
+    sent: ["info", t("مُرسل", "Sent")], accepted: ["ok", t("مقبول", "Accepted")], expired: ["warn", t("منتهي الصلاحية", "Expired")],
 });
 export const statusLabel = (status, t) => (statusMap(t)[status] || ["", status])[1];
 export function StatusBadge({ status }) {

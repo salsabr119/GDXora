@@ -13,6 +13,7 @@ import { OrgChart } from "./screens/orgchart.jsx";
 import { Zatca } from "./screens/zatca.jsx";
 import { Qawaem } from "./screens/qawaem.jsx";
 import { Ajeer } from "./screens/ajeer.jsx";
+import { Quotations, QuotationEditor } from "./screens/quotations.jsx";
 
 export const NAV = [
   { group: ["الرئيسية", "Home"], items: [
@@ -27,6 +28,7 @@ export const NAV = [
     { path: "/accounting/periods", label: ["الفترات المالية", "Fiscal periods"], perm: "accounting.view", component: A.Periods },
   ]},
   { group: ["المبيعات والفوترة", "Sales & invoicing"], module: "sales", items: [
+    { path: "/sales/quotations", label: ["عروض الأسعار", "Quotations"], perm: "sales.view", component: Quotations },
     { path: "/sales/invoices", label: ["الفواتير الضريبية", "Tax invoices"], perm: "sales.view", component: S.Invoices },
     { path: "/sales/customers", label: ["العملاء", "Customers"], perm: "sales.view", component: S.Customers },
     { path: "/sales/items", label: ["الخدمات والأصناف", "Services & items"], perm: "sales.view", component: S.Items },
@@ -70,6 +72,7 @@ export const DETAIL_ROUTES = [
   { path: "/reports/:key", perm: R.REPORT_PERMS, component: R.ReportView },
   { path: "/accounting/journals/:id", perm: "accounting.view", component: A.JournalEditor },
   { path: "/sales/invoices/:id", perm: "sales.view", component: S.InvoiceEditor },
+  { path: "/sales/quotations/:id", perm: "sales.view", component: QuotationEditor },
   { path: "/projects/:id", perm: "projects.view", component: P.ProjectDetail },
   { path: "/projects/:id/billing/:billingId", perm: "projects.view", component: P.ProgressBilling },
   { path: "/finance/bills/:id", perm: "finance.view", component: F.BillEditor },
