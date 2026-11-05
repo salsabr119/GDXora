@@ -73,7 +73,8 @@ export function RecordForm({ fields, value, onChange, lookups, invalid }) {
  * cfg: { table, title, sub, select, order, managePerm, columns, fields, defaults,
  *        search: [keys], loadLookups: async () => ({}), onRow(row) (custom navigation),
  *        canDelete, filter(query), importable, importer (custom import dialog),
- *        toForm(row) (row → form value), saveRecords([records]) (custom persistence for form + import) }
+ *        toForm(row) (row → form value), saveRecords([records]) (custom persistence for form + import),
+ *        banner(rows, lookups) (summary / alerts shown under the page head) }
  */
 export function Resource({ cfg }) {
   const { t, can } = useApp();
@@ -135,6 +136,7 @@ export function Resource({ cfg }) {
         {canManage && cfg.importable !== false && <button className="btn" onClick={() => setImporting(true)}>⬆ {t("استيراد Excel", "Import Excel")}</button>}
         {canManage && <button className="btn primary" onClick={() => { v.clear(); setEdit({ ...(cfg.defaults || {}) }); }}>{t("+ جديد", "+ New")}</button>}
       </PageHead>
+      {cfg.banner && list.data && cfg.banner(list.data, lookups.data || {})}
       {importing && (() => {
         const Dialog = cfg.importer || ImportDialog;
         return <Dialog cfg={cfg} lookups={lookups.data} existing={list.data || []}

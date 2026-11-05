@@ -12,6 +12,7 @@ import * as R from "./screens/reports.jsx";
 import { OrgChart } from "./screens/orgchart.jsx";
 import { Zatca } from "./screens/zatca.jsx";
 import { Qawaem } from "./screens/qawaem.jsx";
+import { Ajeer } from "./screens/ajeer.jsx";
 
 export const NAV = [
   { group: ["الرئيسية", "Home"], items: [
@@ -46,6 +47,7 @@ export const NAV = [
     { path: "/hr/org-chart", label: ["الهيكل الوظيفي", "Org chart"], perm: "hr.view", component: OrgChart },
     { path: "/hr/departments", label: ["الوحدات التنظيمية", "Organisation units"], perm: "hr.view", component: H.Departments },
     { path: "/hr/eosb", label: ["مكافأة نهاية الخدمة", "End of service"], perm: "hr.view", component: H.Eosb },
+    { path: "/hr/ajeer", label: ["العمالة المؤقتة (أجير)", "Temporary workers (Ajeer)"], perm: "hr.view", component: Ajeer },
   ]},
   { group: ["الرواتب", "Payroll"], module: "payroll", items: [
     { path: "/payroll", label: ["مسيّرات الرواتب", "Payroll runs"], perm: "payroll.view", component: Y.PayrollRuns },
