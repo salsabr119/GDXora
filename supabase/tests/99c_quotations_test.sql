@@ -26,7 +26,8 @@ select t.fails(format($$update quotations set status = 'accepted' where id = '%s
 select t.fails(format($$insert into quotation_lines (quotation_id, line_no, description, quantity, unit_price) values ('%s', 9, 'x', 1, 1)$$, :'q'), 'permission denied');
 
 -- edit the draft: lines replaced, totals follow
-select save_quotation(jsonb_build_object('id', :'q', 'prospect_name', 'شركة الأفق للتطوير', 'title', 'تشطيب مبنى إداري',
+-- (the form always sends every header field: one left out is cleared)
+select save_quotation(jsonb_build_object('id', :'q', 'prospect_name', 'شركة الأفق للتطوير', 'prospect_phone', '0500000000', 'title', 'تشطيب مبنى إداري',
   'lines', jsonb_build_array(jsonb_build_object('item_no', '1.1', 'description', 'لياسة', 'unit', 'م2', 'quantity', 1200, 'unit_price', 35),
                              jsonb_build_object('item_no', '1.2', 'description', 'دهانات', 'unit', 'م2', 'quantity', 900, 'unit_price', 20))));
 select t.ok((select subtotal = 60000 and vat_amount = 9000 and total = 69000 from quotations where id = :'q'), 'totals follow the edit');
