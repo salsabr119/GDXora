@@ -1,9 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { supabase, rpc, run } from "../supabase.js";
 import { Resource, RecordForm, validateRecord } from "../crud.jsx";
 import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, Money, StatusBadge, Modal, Tabs, go, goBack, confirmDialog, Loading } from "../ui.jsx";
 import * as L from "../lookups.js";
 import { num, today } from "../lib/format.js";
+import { ProgressBillingDocument, VariationOrderModal, RetentionTab } from "./claims.jsx";
+import { A4Viewer } from "./InvoiceDocument.jsx";
+import { useLetterhead } from "../lib/letterhead.js";
 
 const projectFields = (t) => [
   { section: t("بيانات المشروع", "Project") },
@@ -118,6 +121,7 @@ export function ProjectDetail({ params }) {
   const [tab, setTab] = useState("boq");
   const [edit, setEdit] = useState(null);
   const [boqEdit, setBoqEdit] = useState(null);
+  const [vo, setVo] = useState(null);
   const [act, busy] = useAction();
   const iss = useIssues();
   const d = useData(async () => {
@@ -137,6 +141,8 @@ export function ProjectDetail({ params }) {
   if (!d.data) return <Loading />;
   const { p, s, boq, budget, billings, invoices, bills } = d.data;
   const boqTotal = boq.reduce((n, b) => n + Number(b.amount), 0);
+  const variations = boq.filter((b) => b.variation_no).reduce((n, b) => n + Number(b.amount), 0);
+  const customerName = lk.data?.customers?.find((c) => c.id === p.customer_id)?.name_ar;
   const billed = billings.filter((b) => b.status === "invoiced").reduce((n, b) => n + Number(b.current_gross), 0);
   const manage = can("projects.manage");
 
@@ -195,7 +201,8 @@ export function ProjectDetail({ params }) {
       </PageHead>
       <div className="grid k4" style={{ marginBottom: 16 }}>
         <div className="panel kpi"><div className="l">{t("قيمة العقد", "Contract value")}</div><div className="v"><Money v={p.contract_value} /></div>
-          <div className="s">{t("المفوتر", "Billed")}: <Money v={billed} /> ({p.contract_value > 0 ? Math.round(billed / p.contract_value * 100) : 0}%)</div></div>
+          {variations > 0 && <div className="s">{t("بعد أوامر التغيير", "With variations")}: <Money v={Number(p.contract_value) + variations} /></div>}
+          <div className="s">{t("المفوتر", "Billed")}: <Money v={billed} /> ({p.contract_value > 0 ? Math.round(billed / (Number(p.contract_value) + variations) * 100) : 0}%)</div></div>
         <div className="panel kpi"><div className="l">{t("الإيرادات", "Revenue")}</div><div className="v"><Money v={s?.revenue} /></div></div>
         <div className="panel kpi"><div className="l">{t("التكاليف", "Costs")}</div><div className="v"><Money v={s?.cost} /></div>
           <div className="s">{t("الميزانية", "Budget")}: <Money v={s?.budget} /></div></div>
@@ -203,16 +210,18 @@ export function ProjectDetail({ params }) {
           <div className="s">{t("الهامش", "Margin")}: {s?.margin_pct ?? "—"}%</div></div>
       </div>
       <Tabs value={tab} onChange={setTab} tabs={[["boq", t("جدول الكميات", "BOQ")], ["billings", t("المستخلصات", "Progress billings")],
-        ["budget", t("الميزانية", "Budget")], ["invoices", t("الفواتير", "Invoices")], ["bills", t("فواتير الموردين", "Vendor bills")]]} />
+        ["retention", t("المحتجزات", "Retention")], ["budget", t("الميزانية", "Budget")], ["invoices", t("الفواتير", "Invoices")], ["bills", t("فواتير الموردين", "Vendor bills")]]} />
 
       {tab === "boq" && <Panel pad={false} title={t("جدول الكميات (BOQ)", "Bill of quantities")}
-        actions={manage && <button className="btn sm" onClick={() => setBoqEdit({ quantity: 0, unit_price: 0 })}>{t("+ بند", "+ Item")}</button>}>
+        actions={manage && <span className="row" style={{ gap: 6 }}><button className="btn sm" onClick={() => setVo(true)}>{t("+ أمر تغيير", "+ Variation order")}</button>
+          <button className="btn sm" onClick={() => setBoqEdit({ quantity: 0, unit_price: 0 })}>{t("+ بند", "+ Item")}</button></span>}>
         <Table rows={boq} onRow={manage ? (r) => setBoqEdit({ ...r }) : undefined}
                empty={t("أضف بنود العقد لتتمكن من إعداد المستخلصات", "Add contract items to prepare progress billings")} columns={[
           { key: "item_no", label: t("البند", "Item") }, { key: "description", label: t("الوصف", "Description") }, { key: "unit", label: t("الوحدة", "Unit") },
           { key: "quantity", label: t("الكمية", "Qty"), type: "num" }, { key: "unit_price", label: t("سعر الوحدة", "Rate"), type: "money" },
           { key: "amount", label: t("القيمة", "Amount"), type: "money" },
-          ...(boq.some((b) => Number(b.opening_billed_qty)) ? [{ key: "opening_billed_qty", label: t("مفوتر قبل النظام", "Billed before"), type: "num" }] : [])]}
+          ...(boq.some((b) => Number(b.opening_billed_qty)) ? [{ key: "opening_billed_qty", label: t("مفوتر قبل النظام", "Billed before"), type: "num" }] : []),
+          ...(boq.some((b) => b.variation_no) ? [{ key: "variation_no", label: t("أمر التغيير", "Variation"), render: (b) => (b.variation_no ? <span className="mono" title={b.variation_ref || ""}>{b.variation_no}</span> : "—") }] : [])]}
           footer={<><td colSpan={5}>{t("الإجمالي", "Total")}</td><td className="n"><Money v={boqTotal} currency={null} /></td></>} />
       </Panel>}
 
@@ -225,6 +234,8 @@ export function ProjectDetail({ params }) {
           { key: "gross_to_date", label: t("الأعمال التراكمية", "To date"), type: "money" },
           { key: "status", label: t("الحالة", "Status"), render: (r) => <span className="row"><StatusBadge status={r.status} />{r.invoices?.number && <span className="mono">{r.invoices.number}</span>}</span> }]} />
       </Panel>}
+
+      {tab === "retention" && <RetentionTab project={p} customer={customerName} />}
 
       {tab === "budget" && <Panel pad={false} title={t("الميزانية التقديرية للتكاليف", "Cost budget")}>
         <table className="tbl edit"><thead><tr><th>{t("البند", "Category")}</th><th className="n">{t("المبلغ", "Amount")}</th></tr></thead>
@@ -259,18 +270,22 @@ export function ProjectDetail({ params }) {
           <button className="btn" onClick={() => setBoqEdit(null)}>{t("إلغاء", "Cancel")}</button><button className="btn primary" form="boq" disabled={busy}>{t("حفظ", "Save")}</button></>}>
         <form id="boq" onSubmit={saveBoq} noValidate><Issues issues={iss.issues} /><RecordForm value={boqEdit} onChange={setBoqEdit} invalid={iss.has} fields={boqFields} /></form>
       </Modal>}
+      {vo && <VariationOrderModal project={p} existing={boq} onClose={() => setVo(null)} onDone={() => { setVo(null); d.reload(); }} />}
     </>
   );
 }
 
 export function ProgressBilling({ params }) {
-  const { t, can } = useApp();
+  const { t, can, org } = useApp();
+  const docRef = useRef(null);
+  const letterhead = useLetterhead();
+  const owners = useData(() => L.customerNames().catch(() => []), []);
   const [act, busy] = useAction();
   const iss = useIssues();
   const [qty, setQty] = useState({});
   const d = useData(async () => {
-    const pb = await run(supabase.from("progress_billings").select("*, projects(code, name_ar, retention_pct, advance_recovery_pct)").eq("id", params.billingId).single());
-    const lines = await run(supabase.from("progress_billing_lines").select("*, project_boq_items(item_no, description, unit, quantity, sort)").eq("billing_id", params.billingId));
+    const pb = await run(supabase.from("progress_billings").select("*, projects(code, name_ar, retention_pct, advance_recovery_pct, contract_no, customer_id)").eq("id", params.billingId).single());
+    const lines = await run(supabase.from("progress_billing_lines").select("*, project_boq_items(item_no, description, unit, quantity, sort, variation_no)").eq("billing_id", params.billingId));
     lines.sort((a, b) => (a.project_boq_items.sort - b.project_boq_items.sort) || String(a.project_boq_items.item_no).localeCompare(String(b.project_boq_items.item_no), undefined, { numeric: true }));
     return { pb, lines };
   }, [params.billingId]);
@@ -303,6 +318,13 @@ export function ProgressBilling({ params }) {
     const inv = await act(async () => { await saveQty(); return rpc("invoice_progress_billing", { p_billing: pb.id }); }, t("تم إنشاء مسودة فاتورة المستخلص\nراجعها ثم «إصدار» لتوليد رمز QR وترحيل القيد.", "Draft invoice created"));
     if (inv) go(`/sales/invoices/${inv}`);
   }
+  async function onPdf() {
+    await act(async () => {
+      const { nodeToPdf, downloadBlob } = await import("../lib/pdf.js");
+      downloadBlob(await nodeToPdf(docRef.current), `${t("مستخلص", "Billing")} ${pb.billing_no} - ${pb.projects.code}.pdf`);
+      return true;
+    });
+  }
   async function onDelete() {
     if (!await confirmDialog(t("حذف المستخلص؟", "Delete billing?"))) return;
     if (await act(async () => { await run(supabase.from("progress_billings").delete().eq("id", pb.id)); return true; })) go(`/projects/${params.id}`);
@@ -316,6 +338,7 @@ export function ProgressBilling({ params }) {
         {draft && <button className="btn" onClick={onSave} disabled={busy}>{t("حفظ الكميات", "Save quantities")}</button>}
         {draft && <button className="btn primary" onClick={onInvoice} disabled={busy}>{t("إنشاء الفاتورة", "Create invoice")}</button>}
         {pb.invoice_id && <a className="btn primary" href={`#/sales/invoices/${pb.invoice_id}`}>{t("عرض الفاتورة", "View invoice")}</a>}
+        <button className="btn" onClick={onPdf} disabled={busy}>⬇ {t("المستخلص PDF", "Billing PDF")}</button>
       </PageHead>
       <Issues issues={iss.issues} />
       <Panel pad={false}>
@@ -340,6 +363,9 @@ export function ProgressBilling({ params }) {
           {" "}{t("نسبة استرداد الدفعة المقدمة", "Advance recovery")}: {pb.projects.advance_recovery_pct}%
         </div>
       </Panel>
+      <div className="section-title">{t("المستخلص كما يُطبع (للاستشاري / المالك)", "Billing as printed (for the consultant / owner)")}</div>
+      <A4Viewer><ProgressBillingDocument ref={docRef} pb={pb} lines={lines} cum={cum} org={org} letterhead={letterhead}
+        customer={(owners.data || []).find((c) => c.id === pb.projects.customer_id)?.name_ar} /></A4Viewer>
     </>
   );
 }
