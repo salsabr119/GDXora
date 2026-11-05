@@ -3,6 +3,7 @@ import { supabase, configured, rpc, run, setOrg, getOrg } from "./supabase.js";
 import { AppCtx, useRoute, match, go, useToasts, ErrorBoundary, ConfirmHost } from "./ui.jsx";
 import { NAV, DETAIL_ROUTES } from "./nav.js";
 import { Auth, Onboarding } from "./screens/auth.jsx";
+import { Assistant } from "./assistant.jsx";
 
 export default function App() {
   const [lang, setLang] = useState(() => { try { return localStorage.getItem("gdx_lang") || "ar"; } catch { return "ar"; } });
@@ -126,6 +127,7 @@ export default function App() {
           </div>
         </div>
       </div>
+      <Assistant />
       {toasts.view}<ConfirmHost />
     </AppCtx.Provider>
   );
