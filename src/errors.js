@@ -28,8 +28,17 @@ const RULES = [
   [/nothing to bill/i, "لا توجد أعمال جديدة لفوترتها في هذا المستخلص", "Nothing new to bill in this period"],
 ];
 
+/** the column and value behind a duplicate-key error ("Key (org_id, code)=(…, PRJ-1) already exists."), or null */
+export function duplicateOf(err) {
+  if (err?.code !== "23505" && !/duplicate key/i.test(err?.message || "")) return null;
+  const m = /Key \((?:org_id, )?([a-z_]+)\)=\((?:[0-9a-f-]{36}, )?(.*)\) already exists/i.exec(err?.details || "");
+  return m ? { column: m[1], value: m[2] } : { column: null, value: null };
+}
+
 export function friendlyError(err, lang = "ar") {
   const msg = err?.message || String(err || "");
+  const dup = duplicateOf(err);
+  if (dup?.value) return lang === "ar" ? `القيمة «${dup.value}» مستخدمة مسبقاً في سجل آخر — غيّرها` : `"${dup.value}" is already used by another record — change it`;
   for (const [re, ar, en] of RULES) if (re.test(msg)) return lang === "ar" ? ar : en;
   return msg || (lang === "ar" ? "حدث خطأ غير متوقع" : "Unexpected error");
 }

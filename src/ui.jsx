@@ -80,7 +80,7 @@ export function useAction() {
     setBusy(true);
     try {
       const r = await fn();
-      if (okMsg) notify(okMsg, "ok");
+      if (okMsg && r !== false) notify(okMsg, "ok");   // false = the action stopped itself (problems shown in the form)
       return r;
     } catch (e) {
       notifyError(e);

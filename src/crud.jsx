@@ -4,6 +4,7 @@
 import { useMemo, useRef, useState } from "react";
 import { supabase, run } from "./supabase.js";
 import { useApp, useData, useAction, PageHead, Panel, Table, Modal, Field, Issues, useIssues, confirmDialog } from "./ui.jsx";
+import { duplicateOf } from "./errors.js";
 
 /**
  * field: { key, label, type: text|number|money|date|select|checkbox|textarea|email|tel,
@@ -113,9 +114,16 @@ export function Resource({ cfg }) {
       record[f.key] = v;
     }
     const ok = await act(async () => {
-      if (cfg.saveRecords) await cfg.saveRecords([edit.id ? { ...record, id: edit.id } : record]);
-      else if (edit.id) await run(supabase.from(cfg.table).update(record).eq("id", edit.id));
-      else await run(supabase.from(cfg.table).insert(record));
+      try {
+        if (cfg.saveRecords) await cfg.saveRecords([edit.id ? { ...record, id: edit.id } : record]);
+        else if (edit.id) await run(supabase.from(cfg.table).update(record).eq("id", edit.id));
+        else await run(supabase.from(cfg.table).insert(record));
+      } catch (e) {
+        // a duplicate value in a field of this form: mark that field instead of a bare toast
+        const dup = duplicateOf(e), f = dup && cfg.fields.find((x) => x.key === dup.column);
+        if (f) { v.check([{ key: f.key, msg: t(`«${f.label}»: القيمة «${dup.value ?? edit[f.key]}» مستخدمة في سجل آخر — اختر قيمة مختلفة`, `"${f.label}": "${dup.value ?? edit[f.key]}" is already used — choose another value`) }]); return false; }
+        throw e;
+      }
       return true;
     }, edit.id ? t(`تم حفظ التعديلات${edit.name_ar || edit.first_name_ar ? ` على «${edit.name_ar || `${edit.first_name_ar} ${edit.last_name_ar || ""}`.trim()}»` : ""}`, "Changes saved")
                : t(`تمت الإضافة${edit.name_ar || edit.first_name_ar ? `: «${edit.name_ar || `${edit.first_name_ar} ${edit.last_name_ar || ""}`.trim()}»` : ""}`, "Added"));
