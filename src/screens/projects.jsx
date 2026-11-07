@@ -5,6 +5,7 @@ import { useApp, useData, useAction, Issues, useIssues, PageHead, Panel, Table, 
 import * as L from "../lookups.js";
 import { num, today } from "../lib/format.js";
 import { ProgressBillingDocument, VariationOrderModal, RetentionTab } from "./claims.jsx";
+import { BudgetTab } from "./budget.jsx";
 import { A4Viewer } from "./InvoiceDocument.jsx";
 import { useLetterhead } from "../lib/letterhead.js";
 
@@ -125,21 +126,20 @@ export function ProjectDetail({ params }) {
   const [act, busy] = useAction();
   const iss = useIssues();
   const d = useData(async () => {
-    const [p, sum, boq, budget, billings, invoices, bills] = await Promise.all([
+    const [p, sum, boq, billings, invoices, bills] = await Promise.all([
       run(supabase.from("projects").select("*").eq("id", params.id).single()),
       rpc("project_summary", { p_project: params.id }),
       run(supabase.from("project_boq_items").select("*").eq("project_id", params.id).order("sort").order("item_no")),
-      run(supabase.from("project_budget_lines").select("*").eq("project_id", params.id)),
       run(supabase.from("progress_billings").select("*, invoices(number, status)").eq("project_id", params.id).order("billing_no")),
       run(supabase.from("invoices").select("id, number, doc_type, status, issue_date, total, net_payable, amount_paid").eq("project_id", params.id).order("created_at", { ascending: false })),
       run(supabase.from("bills").select("id, number, vendor_ref, status, bill_date, total, vendors(name_ar)").eq("project_id", params.id).order("bill_date", { ascending: false })),
     ]);
-    return { p, s: sum?.[0], boq, budget, billings, invoices, bills };
+    return { p, s: sum?.[0], boq, billings, invoices, bills };
   }, [params.id]);
   const lk = useData(async () => ({ customers: await L.customerNames() }), []);
 
   if (!d.data) return <Loading />;
-  const { p, s, boq, budget, billings, invoices, bills } = d.data;
+  const { p, s, boq, billings, invoices, bills } = d.data;
   const boqTotal = boq.reduce((n, b) => n + Number(b.amount), 0);
   const variations = boq.filter((b) => b.variation_no).reduce((n, b) => n + Number(b.amount), 0);
   const customerName = lk.data?.customers?.find((c) => c.id === p.customer_id)?.name_ar;
@@ -181,17 +181,6 @@ export function ProjectDetail({ params }) {
       t("تم إنشاء مسودة المستخلص\nأدخل الكميات التراكمية لكل بند، ثم «إنشاء الفاتورة».", "Draft billing created"));
     if (id) go(`/projects/${p.id}/billing/${id}`);
   }
-  async function saveBudget(category, amount) {
-    await act(async () => {
-      const existing = budget.find((b) => b.category === category && !b.description);
-      if (existing) await run(supabase.from("project_budget_lines").update({ amount: Number(amount || 0) }).eq("id", existing.id));
-      else await run(supabase.from("project_budget_lines").insert({ project_id: p.id, category, amount: Number(amount || 0) }));
-    });
-    d.reload();
-  }
-  const cats = [["materials", t("مواد", "Materials")], ["labour", t("عمالة", "Labour")], ["subcontract", t("مقاولو باطن", "Subcontract")],
-                ["equipment", t("معدات", "Equipment")], ["overhead", t("مصاريف غير مباشرة", "Overhead")], ["other", t("أخرى", "Other")]];
-
   return (
     <>
       <PageHead title={`${p.code} — ${p.name_ar}`} sub={<span className="row"><StatusBadge status={p.status} />{lk.data?.customers?.find((c) => c.id === p.customer_id)?.name_ar}</span>}>
@@ -237,16 +226,7 @@ export function ProjectDetail({ params }) {
 
       {tab === "retention" && <RetentionTab project={p} customer={customerName} />}
 
-      {tab === "budget" && <Panel pad={false} title={t("الميزانية التقديرية للتكاليف", "Cost budget")}>
-        <table className="tbl edit"><thead><tr><th>{t("البند", "Category")}</th><th className="n">{t("المبلغ", "Amount")}</th></tr></thead>
-          <tbody>{cats.map(([k, label]) => {
-            const v = budget.filter((b) => b.category === k).reduce((n, b) => n + Number(b.amount), 0);
-            return <tr key={k}><td>{label}</td><td className="n">{manage
-              ? <input className="num" type="number" step="0.01" defaultValue={v || ""} style={{ maxWidth: 200 }} onBlur={(e) => Number(e.target.value || 0) !== v && saveBudget(k, e.target.value)} />
-              : <Money v={v} currency={null} />}</td></tr>;
-          })}</tbody>
-          <tfoot><tr><td>{t("الإجمالي", "Total")}</td><td className="n"><Money v={s?.budget} currency={null} /></td></tr></tfoot></table>
-      </Panel>}
+      {tab === "budget" && <BudgetTab project={p} actualCost={s?.cost} onChange={d.reload} />}
 
       {tab === "invoices" && <Panel pad={false}><Table rows={invoices} onRow={(r) => go(`/sales/invoices/${r.id}`)} columns={[
         { key: "number", label: t("الرقم", "No."), render: (r) => <span className="mono">{r.number || "—"}</span> },
