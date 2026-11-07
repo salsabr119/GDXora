@@ -186,6 +186,7 @@ export function ProjectDetail({ params }) {
       <PageHead title={`${p.code} — ${p.name_ar}`} sub={<span className="row"><StatusBadge status={p.status} />{lk.data?.customers?.find((c) => c.id === p.customer_id)?.name_ar}</span>}>
         <button className="btn" onClick={() => goBack("/projects")}>{t("رجوع", "Back")}</button>
         {manage && <button className="btn" onClick={() => setEdit({ ...p })}>{t("تعديل", "Edit")}</button>}
+        {can("finance.manage") && <button className="btn" onClick={() => go(`/finance/bills/new?project=${p.id}`)}>{t("+ فاتورة تكلفة", "+ Cost bill")}</button>}
         {manage && boq.length > 0 && <button className="btn primary" onClick={newBilling} disabled={busy}>{t("+ مستخلص جديد", "+ New progress billing")}</button>}
       </PageHead>
       <div className="grid k4" style={{ marginBottom: 16 }}>
@@ -233,7 +234,11 @@ export function ProjectDetail({ params }) {
         { key: "issue_date", label: t("التاريخ", "Date"), type: "date" }, { key: "total", label: t("الإجمالي", "Total"), type: "money" },
         { key: "status", label: t("الحالة", "Status"), render: (r) => <StatusBadge status={r.status} /> }]} /></Panel>}
 
-      {tab === "bills" && <Panel pad={false}><Table rows={bills} onRow={(r) => go(`/finance/bills/${r.id}`)} columns={[
+      {tab === "bills" && <Panel pad={false} title={t("فواتير التكلفة على المشروع", "Cost bills on this project")}
+        actions={can("finance.manage") && <button className="btn sm primary" onClick={() => go(`/finance/bills/new?project=${p.id}`)}>{t("+ فاتورة تكلفة", "+ Cost bill")}</button>}>
+        {!bills.length && <div className="alert" style={{ margin: 12 }}>{t("فواتير الموردين ومقاولي الباطن وتأجير المعدات ومنشآت أجير تُسجّل هنا: اضغط «+ فاتورة تكلفة»، واختر لكل بند حساب التكلفة (مواد، عمالة، مقاولو باطن، إيجار معدات)، ثم «ترحيل». بعد الترحيل تظهر في بطاقة التكاليف.",
+          "Supplier, subcontractor, equipment-rental and Ajeer bills go here: press “+ Cost bill”, choose each line's cost account, then Post.")}</div>}
+        <Table rows={bills} onRow={(r) => go(`/finance/bills/${r.id}`)} columns={[
         { key: "number", label: t("الرقم", "No."), render: (r) => <span className="mono">{r.number || "—"}</span> },
         { key: "v", label: t("المورد", "Vendor"), render: (r) => r.vendors?.name_ar }, { key: "bill_date", label: t("التاريخ", "Date"), type: "date" },
         { key: "total", label: t("الإجمالي", "Total"), type: "money" }, { key: "status", label: t("الحالة", "Status"), render: (r) => <StatusBadge status={r.status} /> }]} /></Panel>}

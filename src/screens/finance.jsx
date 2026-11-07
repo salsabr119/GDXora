@@ -86,7 +86,9 @@ export function BillEditor({ params }) {
   }, [params.id]);
   const std = lk.data?.tax?.find((x) => x.category === "S")?.id;
   useEffect(() => {
-    if (isNew && lk.data && !form) setForm({ vendor_id: null, vendor_ref: "", project_id: null, bill_date: today(), retention_amount: 0, notes: "", lines: [blankBillLine(std)] });
+    // opened from a project ("+ فاتورة تكلفة"): ?project=<id> preselects it
+    const fromProject = new URLSearchParams(window.location.hash.split("?")[1] || "").get("project");
+    if (isNew && lk.data && !form) setForm({ vendor_id: null, vendor_ref: "", project_id: fromProject || null, bill_date: today(), retention_amount: 0, notes: "", lines: [blankBillLine(std)] });
     if (!isNew && bill.data?.status === "draft" && !form) setForm({ ...bill.data, lines: bill.data.lines.length ? bill.data.lines : [blankBillLine(std)] });
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lk.data, bill.data]);
