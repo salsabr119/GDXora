@@ -21,8 +21,3 @@ npm test && npm run build
 PGHOST=… PGUSER=… ./scripts/test-db.sh          # plain Postgres 16
 node scripts/e2e.mjs                              # with `npx supabase start` running
 ```
-
-## Majar agent (شركة مجار للمقاولات العامة)
-- Separate from GDXora code. Any request about **مجار / Majar** (pricing, BOQ, quotations, contracts, vouchers, market,
-  restructuring) → use the `Majar` agent (`.claude/agents/Majar.md`). It must read **`majar/Majar.md`** (its memory) first,
-  update it after each task (prices, preferences, lessons/mistakes), and commit+push so it stays in the cloud.
